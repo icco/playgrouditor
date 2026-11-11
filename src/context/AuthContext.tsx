@@ -7,6 +7,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GitHub, User } from '../lib/github';
 import { clearLocalFiles, listDrafts } from '../lib/localFiles';
 import { persister, queryClient } from '../lib/queryClient';
+import { ensureBackgroundSync, setBackgroundSync } from '../lib/backgroundSync';
+import { KEYCHAIN_SERVICE } from '../config';
 
 interface AuthContextType {
   token: string | null;
@@ -21,7 +23,6 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const KEYCHAIN_SERVICE = 'com.timeclimbers.playgrounditor.token';
 const RECENT_KEY = '@playgrounditor:recent_repos';
 const USER_KEY = '@playgrounditor:user';
 
@@ -104,6 +105,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!github) return;
     startOutbox();
+    ensureBackgroundSync().catch((e: unknown) => console.error('Could not schedule offline refresh', e));
     const flush = () => {
       if (!onlineManager.isOnline()) return;
       flushOutbox(github, draft => {
@@ -136,7 +138,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       queryClient.clear();
       setRecentRepos([]);
-      await Promise.all([persister.removeClient(), clearLocalFiles(), AsyncStorage.removeItem(RECENT_KEY)]);
+      await Promise.all([
+        persister.removeClient(),
+        clearLocalFiles(),
+        AsyncStorage.removeItem(RECENT_KEY),
+        setBackgroundSync(false),
+      ]);
     }
     await Keychain.setGenericPassword('github', t, { service: KEYCHAIN_SERVICE });
     await AsyncStorage.setItem(USER_KEY, JSON.stringify(u));
@@ -153,6 +160,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       clearLocalFiles(),
       AsyncStorage.removeItem(RECENT_KEY),
       AsyncStorage.removeItem(USER_KEY),
+      setBackgroundSync(false),
     ]);
   }, [signOutLocally]);
 

@@ -26,13 +26,13 @@ function blobs(n: number): TreeEntry[] {
 function fakeGitHub(entries: TreeEntry[], opts: { truncated?: boolean; texts?: Record<string, string | null> } = {}) {
   const gh = {
     rateLimitRemaining: null as number | null,
-    repo: jest.fn().mockResolvedValue({ full_name: repo, default_branch: 'main' }),
-    tree: jest.fn().mockResolvedValue({ sha: 'tree1', truncated: opts.truncated ?? false, entries }),
-    blob: jest.fn((_: string, sha: string) =>
+    repo: jest.fn<Promise<{ full_name: string; default_branch: string }>, [string]>().mockResolvedValue({ full_name: repo, default_branch: 'main' }),
+    tree: jest.fn<Promise<{ sha: string; truncated: boolean; entries: TreeEntry[] }>, [string, string]>().mockResolvedValue({ sha: 'tree1', truncated: opts.truncated ?? false, entries }),
+    blob: jest.fn<Promise<string | null>, [string, string]>((_: string, sha: string) =>
       Promise.resolve(opts.texts && sha in opts.texts ? opts.texts[sha] : `t-${sha}`),
     ),
   };
-  return gh as typeof gh & GitHub;
+  return gh;
 }
 
 describe('offline sync', () => {
@@ -44,7 +44,7 @@ describe('offline sync', () => {
   it('fetches only blobs it does not have', async () => {
     await saveBlob(repo, 's0', 't-s0');
     const gh = fakeGitHub(blobs(3));
-    await syncRepo(gh, repo);
+    await syncRepo(gh as unknown as GitHub, repo);
     expect(gh.blob.mock.calls.map(c => c[1])).toEqual(['s1', 's2']);
     const kept = await getKeptRepo(repo);
     expect(kept).toMatchObject({ treeSha: 'tree1', fileCount: 3, bytes: 6, pending: 0, syncing: false });
@@ -62,14 +62,14 @@ describe('offline sync', () => {
       ],
       { texts: { bad: null } },
     );
-    await syncRepo(gh, repo);
+    await syncRepo(gh as unknown as GitHub, repo);
     expect(gh.blob.mock.calls.map(c => c[1])).toEqual(['bad', 'ok']);
     expect(await getKeptRepo(repo)).toMatchObject({ fileCount: 1, pending: 0, treeSha: 'tree1' });
   });
 
   it('records too large for a truncated tree', async () => {
     const gh = fakeGitHub(blobs(2), { truncated: true });
-    await syncRepo(gh, repo);
+    await syncRepo(gh as unknown as GitHub, repo);
     expect(gh.blob).not.toHaveBeenCalled();
     expect((await getKeptRepo(repo))?.error).toBe('This repo is too large to keep offline.');
   });
@@ -77,10 +77,10 @@ describe('offline sync', () => {
   it('resumes after shouldStop without refetching', async () => {
     const gh = fakeGitHub(blobs(6));
     let batches = 0;
-    await syncRepo(gh, repo, () => batches++ >= 1);
+    await syncRepo(gh as unknown as GitHub, repo, () => batches++ >= 1);
     expect(gh.blob).toHaveBeenCalledTimes(4);
     expect(await getKeptRepo(repo)).toMatchObject({ pending: 2 });
-    await syncRepo(gh, repo);
+    await syncRepo(gh as unknown as GitHub, repo);
     expect(gh.blob).toHaveBeenCalledTimes(6);
     expect(await getKeptRepo(repo)).toMatchObject({ pending: 0, fileCount: 6 });
   });
@@ -89,7 +89,7 @@ describe('offline sync', () => {
     const old: TreeEntry[] = [{ path: 'old.md', type: 'blob', sha: 'o1', size: 2 }];
     await saveKeptTree(repo, old);
     await saveBlob(repo, 'o1', 'old');
-    await syncRepo(fakeGitHub(blobs(6)), repo, () => true);
+    await syncRepo(fakeGitHub(blobs(6)) as unknown as GitHub, repo, () => true);
     await expect(getKeptTree(repo)).resolves.toEqual(old);
     await expect(hasBlob(repo, 'o1')).resolves.toBe(true);
   });
@@ -100,7 +100,7 @@ describe('offline sync', () => {
       gh.rateLimitRemaining = 499;
       return Promise.resolve(`t-${sha}`);
     });
-    await syncRepo(gh, repo);
+    await syncRepo(gh as unknown as GitHub, repo);
     expect(gh.blob).toHaveBeenCalledTimes(4);
     expect(await getKeptRepo(repo)).toMatchObject({ pending: 2, error: "Paused until GitHub's rate limit resets." });
   });
@@ -110,7 +110,7 @@ describe('offline sync', () => {
     await saveKeptTree(repo, old);
     const gh = fakeGitHub([]);
     gh.tree.mockRejectedValue(new GitHubError('Not Found', 404));
-    await syncRepo(gh, repo);
+    await syncRepo(gh as unknown as GitHub, repo);
     expect(await getKeptRepo(repo)).toMatchObject({ error: 'Not Found', syncing: false });
     await expect(getKeptTree(repo)).resolves.toEqual(old);
   });
@@ -121,7 +121,7 @@ describe('offline sync', () => {
       await unkeepRepo(repo);
       return `t-${sha}`;
     });
-    await syncRepo(gh, repo);
+    await syncRepo(gh as unknown as GitHub, repo);
     expect((await AsyncStorage.getAllKeys()).filter(k => /offline:(tree|blob):/.test(k))).toEqual([]);
     await expect(getKeptRepo(repo)).resolves.toBeNull();
   });
@@ -132,20 +132,20 @@ describe('offline sync', () => {
       await clearLocalFiles();
       return `t-${sha}`;
     });
-    await syncRepo(gh, repo);
+    await syncRepo(gh as unknown as GitHub, repo);
     expect(await AsyncStorage.getAllKeys()).toEqual([]);
   });
 
   it('joins a running sync for the same repo', async () => {
     const gh = fakeGitHub(blobs(2));
-    await Promise.all([syncRepo(gh, repo), syncRepo(gh, repo)]);
+    await Promise.all([syncRepo(gh as unknown as GitHub, repo), syncRepo(gh as unknown as GitHub, repo)]);
     expect(gh.tree).toHaveBeenCalledTimes(1);
   });
 
   it('syncs every kept repo', async () => {
     await keepRepo('alice/blog', 'main');
     const gh = fakeGitHub(blobs(1));
-    await syncAll(gh);
+    await syncAll(gh as unknown as GitHub);
     expect(gh.tree.mock.calls.map(c => c[0])).toEqual([repo, 'alice/blog']);
   });
 });
