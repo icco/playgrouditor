@@ -1,5 +1,6 @@
 import { GitHub, GitHubError, Repo, isConflict, isTransient } from './github';
 import { Draft, cacheFile, deleteDraft, fileId, getDraft, listDrafts, writeDraft } from './localFiles';
+import { recordCommittedFile } from './offlineRepos';
 
 type Listener = () => void;
 
@@ -72,6 +73,9 @@ async function send(github: GitHub, draft: Draft): Promise<string> {
   if (draft.queued!.mode === 'direct') {
     cacheFile(draft.repoFullName, draft.path, { sha, text: draft.text }).catch((e: unknown) =>
       console.warn('Could not cache file', e),
+    );
+    await recordCommittedFile(draft.repoFullName, draft.path, { sha, text: draft.text }).catch((e: unknown) =>
+      console.warn('Could not update the offline copy', e),
     );
   }
   return sha;

@@ -20,6 +20,7 @@ import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../theme/ThemeContext';
 import { errorMessage } from '../lib/errors';
 import { Entry, formatDate, isEditable, isMarkdown, newFilePath, sortEntries } from '../lib/github';
+import { listDirOffline, repoOffline } from '../lib/offlineFallback';
 import { RootStackParamList, SortBy } from '../types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'FileBrowser'>;
@@ -40,14 +41,14 @@ export function FileBrowserScreen({ route, navigation }: Props) {
 
   const repoQuery = useQuery({
     queryKey: ['repo', repoFullName],
-    queryFn: () => github!.repo(repoFullName),
+    queryFn: () => repoOffline(github!, repoFullName),
     enabled: !!github,
   });
   const defaultBranch = repoQuery.data?.default_branch;
 
   const dirQuery = useQuery({
     queryKey: ['dir', repoFullName, currentPath, defaultBranch],
-    queryFn: () => github!.list(repoFullName, currentPath, defaultBranch!),
+    queryFn: () => listDirOffline(github!, repoFullName, currentPath, defaultBranch!),
     enabled: !!github && !!defaultBranch,
   });
 

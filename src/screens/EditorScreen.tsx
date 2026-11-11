@@ -17,7 +17,9 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../theme/ThemeContext';
-import { Repo, isConflict, isMarkdown, isTransient } from '../lib/github';
+import { GitHubError, NETWORK_ERROR_STATUS, Repo, isConflict, isMarkdown, isTransient } from '../lib/github';
+import { readFileOffline } from '../lib/offlineFallback';
+import { recordCommittedFile } from '../lib/offlineRepos';
 import { clearOpenFile, notifyOutbox, queueCommit, setOpenFile } from '../lib/outbox';
 import { resolveEditorStart } from '../lib/editorStart';
 import { cacheFile, deleteDraft, getCachedFile, getDraft, saveDraft } from '../lib/localFiles';
@@ -146,6 +148,14 @@ export function EditorScreen({ route, navigation }: Props) {
           }
           if (!active) return;
         }
+        if (!isNew && !base && (!github || (fetchError instanceof GitHubError && fetchError.status === NETWORK_ERROR_STATUS))) {
+          try {
+            base = await readFileOffline(repoFullName, path, null);
+          } catch (e: unknown) {
+            fetchError = e;
+          }
+          if (!active) return;
+        }
 
         const start = resolveEditorStart(draft, base, fetchError);
         if ('error' in start) {
@@ -252,6 +262,9 @@ export function EditorScreen({ route, navigation }: Props) {
         setSha(res.sha);
         cacheFile(repoFullName, path, { sha: res.sha, text: committed }).catch((e: unknown) =>
           console.warn('Could not cache file', e),
+        );
+        recordCommittedFile(repoFullName, path, { sha: res.sha, text: committed }).catch((e: unknown) =>
+          console.warn('Could not update the offline copy', e),
         );
       }
       finishSave(committed, res.prUrl);
