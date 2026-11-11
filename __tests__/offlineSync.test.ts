@@ -67,6 +67,48 @@ describe('offline sync', () => {
     expect(await getKeptRepo(repo)).toMatchObject({ fileCount: 1, pending: 0, treeSha: 'tree1' });
   });
 
+  it('fetches each sha once when paths share content', async () => {
+    const gh = fakeGitHub([
+      { path: 'a.md', type: 'blob', sha: 'same', size: 2 },
+      { path: 'b.md', type: 'blob', sha: 'same', size: 2 },
+      { path: 'c.md', type: 'blob', sha: 'other', size: 2 },
+    ]);
+    await syncRepo(gh as unknown as GitHub, repo);
+    expect(gh.blob.mock.calls.map(c => c[1])).toEqual(['same', 'other']);
+    expect(await getKeptRepo(repo)).toMatchObject({ fileCount: 3 });
+    await expect(readKeptFile(repo, 'b.md')).resolves.toEqual({ sha: 'same', text: 't-same' });
+  });
+
+  it('remembers non-UTF-8 blobs across runs', async () => {
+    const gh = fakeGitHub([{ path: 'latin1.txt', type: 'blob', sha: 'bad', size: 4 }], { texts: { bad: null } });
+    await syncRepo(gh as unknown as GitHub, repo);
+    await syncRepo(gh as unknown as GitHub, repo);
+    expect(gh.blob).toHaveBeenCalledTimes(1);
+    await expect(readKeptFile(repo, 'latin1.txt')).rejects.toThrow('This file is not stored offline.');
+  });
+
+  it('skips symlinks', async () => {
+    const gh = fakeGitHub([{ path: 'link.md', type: 'blob', sha: 'l1', size: 6, mode: '120000' }]);
+    await syncRepo(gh as unknown as GitHub, repo);
+    expect(gh.blob).not.toHaveBeenCalled();
+    expect(await getKeptRepo(repo)).toMatchObject({ fileCount: 0, treeSha: 'tree1' });
+  });
+
+  it('does not publish a new tree once stopped, even with nothing to download', async () => {
+    const old: TreeEntry[] = [{ path: 'old.md', type: 'blob', sha: 'o1', size: 2 }];
+    await saveKeptTree(repo, old);
+    await saveBlob(repo, 'o1', 'old');
+    await saveBlob(repo, 's0', 't-s0');
+    let stop = false;
+    const gh = fakeGitHub(blobs(1));
+    gh.tree.mockImplementation(() => {
+      stop = true;
+      return Promise.resolve({ sha: 'tree1', truncated: false, entries: blobs(1) });
+    });
+    await syncRepo(gh as unknown as GitHub, repo, () => stop);
+    await expect(getKeptTree(repo)).resolves.toEqual(old);
+  });
+
   it('records too large for a truncated tree', async () => {
     const gh = fakeGitHub(blobs(2), { truncated: true });
     await syncRepo(gh as unknown as GitHub, repo);

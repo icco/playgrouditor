@@ -1,12 +1,15 @@
 import { GitHub, GitHubError, TreeEntry, isEditable } from './github';
 import {
   deleteUnreferencedBlobs,
-  getKeptRepo,
+  getSkippedShas,
   hasBlob,
+  isSymlink,
   listKeptRepos,
   saveBlob,
   saveKeptTree,
+  saveSkippedShas,
   updateKeptRepo,
+  whileKept,
 } from './offlineRepos';
 
 const MAX_FILE_BYTES = 1_000_000;
@@ -17,7 +20,7 @@ const running = new Map<string, Promise<void>>();
 
 function wanted(entry: TreeEntry): boolean {
   const name = entry.path.split('/').pop() ?? '';
-  return entry.type === 'blob' && isEditable(name) && (entry.size ?? 0) <= MAX_FILE_BYTES;
+  return entry.type === 'blob' && !isSymlink(entry) && isEditable(name) && (entry.size ?? 0) <= MAX_FILE_BYTES;
 }
 
 export function syncRepo(github: GitHub, fullName: string, shouldStop: () => boolean = () => false): Promise<void> {
@@ -35,10 +38,6 @@ export async function syncAll(github: GitHub, shouldStop: () => boolean = () => 
   }
 }
 
-async function isKept(fullName: string): Promise<boolean> {
-  return (await getKeptRepo(fullName)) !== null;
-}
-
 async function runSync(github: GitHub, fullName: string, shouldStop: () => boolean): Promise<void> {
   await updateKeptRepo(fullName, { syncing: true, error: undefined });
   try {
@@ -49,9 +48,11 @@ async function runSync(github: GitHub, fullName: string, shouldStop: () => boole
       return;
     }
     const files = tree.entries.filter(wanted);
-    const missing: TreeEntry[] = [];
-    for (const f of files) if (!(await hasBlob(fullName, f.sha))) missing.push(f);
-    const notText = new Set<string>();
+    const skipped = await getSkippedShas(fullName);
+    const missing: string[] = [];
+    for (const sha of new Set(files.map(f => f.sha))) {
+      if (!skipped.has(sha) && !(await hasBlob(fullName, sha))) missing.push(sha);
+    }
     let pending = missing.length;
     await updateKeptRepo(fullName, { pending, defaultBranch: repo.default_branch });
 
@@ -62,26 +63,31 @@ async function runSync(github: GitHub, fullName: string, shouldStop: () => boole
         return;
       }
       const batch = missing.slice(i, i + BATCH_SIZE);
-      const texts = await Promise.all(batch.map(f => github.blob(fullName, f.sha)));
-      if (!(await isKept(fullName))) return;
-      await Promise.all(
-        batch.map((f, j) => {
-          const text = texts[j];
-          if (text === null) {
-            notText.add(f.sha);
+      const texts = await Promise.all(batch.map(sha => github.blob(fullName, sha)));
+      const kept = await whileKept(fullName, async () => {
+        await Promise.all(
+          batch.map((sha, j) => {
+            const text = texts[j];
+            if (text !== null) return saveBlob(fullName, sha, text);
+            skipped.add(sha);
             return Promise.resolve();
-          }
-          return saveBlob(fullName, f.sha, text);
-        }),
-      );
+          }),
+        );
+        await saveSkippedShas(fullName, skipped);
+      });
+      if (!kept) return;
       pending -= batch.length;
       await updateKeptRepo(fullName, { pending });
     }
 
-    if (!(await isKept(fullName))) return;
-    const stored = files.filter(f => !notText.has(f.sha));
-    await saveKeptTree(fullName, tree.entries);
-    await deleteUnreferencedBlobs(fullName, new Set(stored.map(f => f.sha)));
+    if (shouldStop()) return;
+    const stored = files.filter(f => !skipped.has(f.sha));
+    const treeShas = new Set(files.map(f => f.sha));
+    await whileKept(fullName, async () => {
+      await saveKeptTree(fullName, tree.entries);
+      await deleteUnreferencedBlobs(fullName, new Set(stored.map(f => f.sha)));
+      await saveSkippedShas(fullName, new Set([...skipped].filter(sha => treeShas.has(sha))));
+    });
     await updateKeptRepo(fullName, {
       treeSha: tree.sha,
       syncedAt: new Date().toISOString(),
