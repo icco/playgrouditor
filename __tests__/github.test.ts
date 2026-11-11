@@ -22,6 +22,36 @@ describe('GitHub client', () => {
     const fetcher = jest.fn().mockResolvedValue(jsonResponse({ path: 'big.md', sha: '1', content: '', encoding: 'none' }));
     await expect(new GitHub('token', fetcher).read('alice/repo', 'big.md', 'main')).rejects.toBeInstanceOf(GitHubError);
   });
+
+  it('fetches a recursive tree', async () => {
+    const fetcher = jest.fn().mockResolvedValue(
+      jsonResponse({ sha: 't1', truncated: false, tree: [{ path: 'a.md', type: 'blob', sha: 'b1', size: 3, mode: '100644' }] }),
+    );
+    const tree = await new GitHub('token', fetcher).tree('alice/notes', 'main');
+    expect(fetcher).toHaveBeenCalledWith(expect.stringContaining('/repos/alice/notes/git/trees/main?recursive=1'), expect.anything());
+    expect(tree).toEqual({ sha: 't1', truncated: false, entries: [{ path: 'a.md', type: 'blob', sha: 'b1', size: 3, mode: '100644' }] });
+  });
+
+  it('decodes a blob and returns null for non-UTF-8', async () => {
+    const fetcher = jest
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ content: encodeBase64('hi ✍️'), encoding: 'base64' }))
+      .mockResolvedValueOnce(jsonResponse({ content: Base64.fromUint8Array(new Uint8Array([0xff, 0xfe])), encoding: 'base64' }));
+    const gh = new GitHub('token', fetcher);
+    await expect(gh.blob('alice/notes', 'b1')).resolves.toBe('hi ✍️');
+    await expect(gh.blob('alice/notes', 'b2')).resolves.toBeNull();
+    expect(fetcher).toHaveBeenCalledWith(expect.stringContaining('/repos/alice/notes/git/blobs/b1'), expect.anything());
+  });
+
+  it('records the rate limit remaining', async () => {
+    const withHeader = { ...jsonResponse({}), headers: new Headers({ 'x-ratelimit-remaining': '42' }) } as Response;
+    const gh = new GitHub('token', jest.fn().mockResolvedValueOnce(withHeader).mockResolvedValueOnce(jsonResponse({})));
+    expect(gh.rateLimitRemaining).toBeNull();
+    await gh.user();
+    expect(gh.rateLimitRemaining).toBe(42);
+    await gh.user();
+    expect(gh.rateLimitRemaining).toBe(42);
+  });
 });
 
 describe('base64 UTF-8 encoding', () => {

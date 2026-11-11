@@ -8,6 +8,7 @@ import {
   Pressable,
   RefreshControl,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -20,6 +21,10 @@ import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../theme/ThemeContext';
 import { errorMessage } from '../lib/errors';
 import { Entry, formatDate, isEditable, isMarkdown, newFilePath, sortEntries } from '../lib/github';
+import { listDirOffline, repoOffline } from '../lib/offlineFallback';
+import { turnOffOffline, turnOnOffline } from '../lib/offlineActions';
+import { offlineStatus } from '../lib/offlineStatus';
+import { useKeptRepos } from '../lib/useKeptRepos';
 import { RootStackParamList, SortBy } from '../types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'FileBrowser'>;
@@ -40,14 +45,14 @@ export function FileBrowserScreen({ route, navigation }: Props) {
 
   const repoQuery = useQuery({
     queryKey: ['repo', repoFullName],
-    queryFn: () => github!.repo(repoFullName),
+    queryFn: () => repoOffline(github!, repoFullName),
     enabled: !!github,
   });
   const defaultBranch = repoQuery.data?.default_branch;
 
   const dirQuery = useQuery({
     queryKey: ['dir', repoFullName, currentPath, defaultBranch],
-    queryFn: () => github!.list(repoFullName, currentPath, defaultBranch!),
+    queryFn: () => listDirOffline(github!, repoFullName, currentPath, defaultBranch!),
     enabled: !!github && !!defaultBranch,
   });
 
@@ -68,6 +73,13 @@ export function FileBrowserScreen({ route, navigation }: Props) {
   const failure = repoQuery.error ?? dirQuery.error ?? (sortBy === 'modified' ? modifiedQuery.error : null);
   const loading = !dirQuery.data && (repoQuery.isLoading || dirQuery.isLoading);
   const breadcrumbs = currentPath ? currentPath.split('/') : [];
+
+  const kept = useKeptRepos().find(r => r.fullName === repoFullName);
+
+  function toggleOffline(on: boolean) {
+    const action = on && github && defaultBranch ? turnOnOffline(github, repoFullName, defaultBranch) : turnOffOffline(repoFullName);
+    action.catch((e: unknown) => Alert.alert('Keep offline', errorMessage(e, 'Could not change the offline copy')));
+  }
 
   function openDir(path: string) {
     navigation.push('FileBrowser', { repoFullName, path });
@@ -155,6 +167,18 @@ export function FileBrowserScreen({ route, navigation }: Props) {
           borderBottomWidth: 1,
           borderBottomColor: theme.colors.border,
         },
+        offlineRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          paddingHorizontal: 16,
+          paddingVertical: 8,
+          backgroundColor: theme.colors.surface,
+          borderBottomWidth: 1,
+          borderBottomColor: theme.colors.border,
+        },
+        offlineInfo: { flex: 1 },
+        offlineLabel: { fontSize: 13, color: theme.colors.text, fontWeight: '500' },
+        offlineStatus: { fontSize: 12, color: theme.colors.textMuted, marginTop: 2 },
         sortLabel: { fontSize: 13, color: theme.colors.textMuted, marginRight: 8, fontWeight: '500' },
         sortBtn: {
           paddingHorizontal: 12,
@@ -254,6 +278,20 @@ export function FileBrowserScreen({ route, navigation }: Props) {
             </Text>
           </Pressable>
         ))}
+      </View>
+
+      <View style={styles.offlineRow}>
+        <View style={styles.offlineInfo}>
+          <Text style={styles.offlineLabel}>Keep offline</Text>
+          {kept ? <Text style={styles.offlineStatus}>{offlineStatus(kept)}</Text> : null}
+        </View>
+        <Switch
+          accessibilityLabel="Keep offline"
+          value={!!kept}
+          disabled={!github || !defaultBranch}
+          onValueChange={toggleOffline}
+          trackColor={{ true: theme.colors.primary, false: theme.colors.inputBg }}
+        />
       </View>
 
       {failure ? <Text style={styles.error}>{errorMessage(failure, 'Failed to load directory')}</Text> : null}

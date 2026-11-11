@@ -1,6 +1,7 @@
 import { encodeBase64 } from '../src/lib/base64';
 import { GitHub } from '../src/lib/github';
 import { clearLocalFiles, getDraft, saveDraft, writeDraft } from '../src/lib/localFiles';
+import { keepRepo, readKeptFile, saveBlob, saveKeptTree } from '../src/lib/offlineRepos';
 import { clearOpenFile, flushOutbox, setOpenFile, startOutbox, stopOutbox, subscribeOutbox } from '../src/lib/outbox';
 
 jest.mock('@react-native-async-storage/async-storage', () => {
@@ -42,6 +43,26 @@ describe('outbox', () => {
     await flushOutbox(new GitHub('t', jest.fn().mockResolvedValue(respond({ content: { sha: 'new' } }))), onSent);
     expect(onSent).toHaveBeenCalledTimes(1);
     expect(await getDraft('alice/notes', 'a.md')).toBeNull();
+  });
+
+  it('a sent commit updates the kept copy', async () => {
+    await keepRepo('alice/notes', 'main');
+    await saveKeptTree('alice/notes', [{ path: 'a.md', type: 'blob', sha: 'old', size: 3 }]);
+    await flushOutbox(new GitHub('t', jest.fn().mockResolvedValue(respond({ content: { sha: 'new' } }))), jest.fn());
+    await expect(readKeptFile('alice/notes', 'a.md')).resolves.toEqual({ sha: 'new', text: 'hello' });
+  });
+
+  it('a queued commit from a kept blob that changed on GitHub stays Not sent', async () => {
+    await keepRepo('alice/notes', 'main');
+    await saveKeptTree('alice/notes', [{ path: 'a.md', type: 'blob', sha: 'old', size: 3 }]);
+    await saveBlob('alice/notes', 'old', 'abc');
+    const fetcher = jest
+      .fn()
+      .mockResolvedValueOnce(respond({ message: 'does not match' }, 409))
+      .mockResolvedValueOnce(respond({ path: 'a.md', sha: 'theirs', encoding: 'base64', content: encodeBase64('theirs') }));
+    await flushOutbox(new GitHub('t', fetcher), jest.fn());
+    expect((await getDraft('alice/notes', 'a.md'))?.sendError).toBe('does not match');
+    await expect(readKeptFile('alice/notes', 'a.md')).resolves.toEqual({ sha: 'old', text: 'abc' });
   });
 
   it('stays queued on a network failure', async () => {

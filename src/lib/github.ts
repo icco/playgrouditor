@@ -37,6 +37,14 @@ export interface Entry {
   modified?: string;
 }
 
+export interface TreeEntry {
+  path: string;
+  type: 'blob' | 'tree' | 'commit';
+  sha: string;
+  size?: number;
+  mode?: string;
+}
+
 export interface FileContent {
   path: string;
   sha: string;
@@ -61,6 +69,8 @@ export class GitHub {
 
   onUnauthorized?: () => void;
 
+  rateLimitRemaining: number | null = null;
+
   private async req<T>(path: string, init: RequestInit = {}): Promise<T> {
     const { res, body } = await timedFetch(this.fetcher, `${API}${path}`, {
       ...init,
@@ -72,6 +82,8 @@ export class GitHub {
         ...(init.headers as Record<string, string> | undefined),
       },
     });
+    const remaining = res.headers?.get('x-ratelimit-remaining');
+    if (remaining) this.rateLimitRemaining = Number(remaining);
     if (!res.ok) {
       if (res.status === 401) this.onUnauthorized?.();
       const message = (body as { message?: string } | undefined)?.message;
@@ -138,6 +150,19 @@ export class GitHub {
       `/repos/${fullName}/contents/${encodePath(path)}?ref=${encodeURIComponent(ref)}`,
     );
     return sortEntries(entries);
+  }
+
+  async tree(fullName: string, ref: string): Promise<{ sha: string; truncated: boolean; entries: TreeEntry[] }> {
+    const res = await this.req<{ sha: string; truncated: boolean; tree: TreeEntry[] }>(
+      `/repos/${fullName}/git/trees/${encodeURIComponent(ref)}?recursive=1`,
+    );
+    const entries = res.tree.map(({ path, type, sha, size, mode }) => ({ path, type, sha, size, mode }));
+    return { sha: res.sha, truncated: res.truncated, entries };
+  }
+
+  async blob(fullName: string, sha: string): Promise<string | null> {
+    const res = await this.req<{ content: string; encoding: string }>(`/repos/${fullName}/git/blobs/${sha}`);
+    return decodeUtf8Strict(res.content);
   }
 
   async read(fullName: string, path: string, ref: string): Promise<FileContent> {

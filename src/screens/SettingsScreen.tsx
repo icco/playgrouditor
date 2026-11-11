@@ -3,6 +3,9 @@ import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'rea
 import { useAuth } from '../context/AuthContext';
 import { errorMessage } from '../lib/errors';
 import { listDrafts } from '../lib/localFiles';
+import { refreshOffline, turnOffOffline } from '../lib/offlineActions';
+import { formatBytes, offlineStatus } from '../lib/offlineStatus';
+import { useKeptRepos } from '../lib/useKeptRepos';
 import { useTheme } from '../theme/ThemeContext';
 import { ThemeName, AppearanceMode } from '../theme/types';
 import { version } from '../../package.json';
@@ -22,8 +25,24 @@ const MODE_OPTIONS: Array<{ key: AppearanceMode; label: string }> = [
 ];
 
 export function SettingsScreen() {
-  const { user, logout } = useAuth();
+  const { user, logout, github } = useAuth();
   const { theme, themeName, appearanceMode, setThemeName, setAppearanceMode } = useTheme();
+  const keptRepos = useKeptRepos();
+
+  function confirmRemove(fullName: string) {
+    Alert.alert('Remove offline copy?', `${fullName} will only open with a connection. Drafts are kept.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: () => {
+          turnOffOffline(fullName).catch((e: unknown) =>
+            Alert.alert('Remove failed', errorMessage(e, 'Could not remove the offline copy')),
+          );
+        },
+      },
+    ]);
+  }
 
   async function confirmLogout() {
     const drafts = await listDrafts();
@@ -132,6 +151,11 @@ export function SettingsScreen() {
     optionTextActive: {
       color: theme.colors.primary,
     },
+    offlineRepo: {
+      paddingVertical: 10,
+      borderTopWidth: 1,
+      borderTopColor: theme.colors.borderSubtle,
+    },
     aboutTitle: {
       fontSize: 16,
       fontWeight: '700',
@@ -195,6 +219,34 @@ export function SettingsScreen() {
             );
           })}
         </View>
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.sectionTitle}>Offline repos</Text>
+        {keptRepos.length === 0 ? (
+          <Text style={styles.aboutText}>Turn on Keep offline in a repo to read and edit all its files without a connection.</Text>
+        ) : null}
+        {keptRepos.map(r => (
+          <View key={r.fullName} style={styles.offlineRepo}>
+            <Text style={styles.optionText}>{r.fullName}</Text>
+            <Text style={styles.aboutText}>
+              {r.fileCount} files, {formatBytes(r.bytes)}
+            </Text>
+            <Text style={styles.aboutText}>{offlineStatus(r)}</Text>
+            <View style={styles.rowWrap}>
+              <TouchableOpacity
+                style={styles.optionBtn}
+                disabled={!github}
+                onPress={() => github && refreshOffline(github, r.fullName)}
+              >
+                <Text style={styles.optionText}>Refresh now</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.optionBtn} onPress={() => confirmRemove(r.fullName)}>
+                <Text style={[styles.optionText, { color: theme.colors.dangerText }]}>Remove</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ))}
       </View>
 
       <View style={styles.card}>
