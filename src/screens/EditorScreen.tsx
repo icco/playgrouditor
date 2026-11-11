@@ -360,6 +360,7 @@ export function EditorScreen({ route, navigation }: Props) {
           justifyContent: 'space-between',
         },
         statusText: { fontSize: 12, color: theme.colors.textMuted },
+        bottomInset: { height: insets.bottom, backgroundColor: theme.colors.surface },
         center: {
           flex: 1,
           justifyContent: 'center',
@@ -502,7 +503,9 @@ export function EditorScreen({ route, navigation }: Props) {
         />
       )}
 
-      {landscape ? null : (
+      {landscape ? (
+        <View style={styles.bottomInset} />
+      ) : (
         <View style={styles.statusBar}>
           <Text style={styles.statusText}>
             {online ? (dirty ? 'Draft saved on this device' : '') : 'Offline. Edits stay on this device.'}
