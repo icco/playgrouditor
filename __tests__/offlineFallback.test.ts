@@ -52,9 +52,16 @@ describe('offline fallback', () => {
     await expect(repoOffline(offline, repo)).resolves.toMatchObject({ full_name: repo, default_branch: 'trunk' });
   });
 
-  it('reads a kept file when nothing newer is cached', async () => {
+  it('prefers the kept copy over the recent-file cache', async () => {
     await expect(readFileOffline(repo, 'docs/a.md', null)).resolves.toEqual({ sha: 'a1', text: 'hello' });
-    await expect(readFileOffline(repo, 'docs/a.md', { sha: 'c1', text: 'cached' })).resolves.toEqual({ sha: 'c1', text: 'cached' });
+    await expect(readFileOffline(repo, 'docs/a.md', { sha: 'c1', text: 'stale' })).resolves.toEqual({ sha: 'a1', text: 'hello' });
+    await expect(readFileOffline('bob/other', 'x.md', { sha: 'c1', text: 'cached' })).resolves.toEqual({ sha: 'c1', text: 'cached' });
     await expect(readFileOffline('bob/other', 'x.md', null)).resolves.toBeNull();
+  });
+
+  it('falls back to the cache when the blob is not stored', async () => {
+    await saveKeptTree(repo, [{ path: 'big.md', type: 'blob', sha: 'big', size: 2_000_000 }]);
+    await expect(readFileOffline(repo, 'big.md', { sha: 'c1', text: 'cached' })).resolves.toEqual({ sha: 'c1', text: 'cached' });
+    await expect(readFileOffline(repo, 'big.md', null)).rejects.toThrow('This file is not stored offline.');
   });
 });

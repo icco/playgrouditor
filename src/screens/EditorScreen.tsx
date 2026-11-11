@@ -148,9 +148,9 @@ export function EditorScreen({ route, navigation }: Props) {
           }
           if (!active) return;
         }
-        if (!isNew && !base && (!github || (fetchError instanceof GitHubError && fetchError.status === NETWORK_ERROR_STATUS))) {
+        if (!isNew && (!github || (fetchError instanceof GitHubError && fetchError.status === NETWORK_ERROR_STATUS))) {
           try {
-            base = await readFileOffline(repoFullName, path, null);
+            base = await readFileOffline(repoFullName, path, cached);
           } catch (e: unknown) {
             fetchError = e;
           }

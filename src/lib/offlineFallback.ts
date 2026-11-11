@@ -37,6 +37,12 @@ export async function repoOffline(github: GitHub, fullName: string): Promise<Rep
   }
 }
 
+// Commits update the kept copy too, so for a kept repo it is never older than the recent-file cache.
 export async function readFileOffline(fullName: string, path: string, cached: CachedFile | null): Promise<CachedFile | null> {
-  return cached ?? readKeptFile(fullName, path);
+  try {
+    return (await readKeptFile(fullName, path)) ?? cached;
+  } catch (e: unknown) {
+    if (cached) return cached;
+    throw e;
+  }
 }
