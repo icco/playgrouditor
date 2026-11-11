@@ -7,10 +7,12 @@ import {
   Linking,
   Modal,
   Pressable,
+  StatusBar,
   StyleSheet,
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { usePreventRemove } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -38,6 +40,8 @@ export function EditorScreen({ route, navigation }: Props) {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
   const online = useIsOnline();
+  const { width, height } = useWindowDimensions();
+  const landscape = width > height;
   const [text, setText] = useState('');
   const [savedText, setSavedText] = useState('');
   const [sha, setSha] = useState(initialSha);
@@ -189,6 +193,10 @@ export function EditorScreen({ route, navigation }: Props) {
     setLoadAttempt(a => a + 1);
   }
 
+  useEffect(() => {
+    navigation.setOptions({ headerShown: !landscape });
+  }, [navigation, landscape]);
+
   const wordCount = useMemo(() => {
     const trimmed = text.trim();
     return trimmed ? trimmed.split(/\s+/).length : 0;
@@ -309,7 +317,15 @@ export function EditorScreen({ route, navigation }: Props) {
           borderBottomWidth: 1,
           borderBottomColor: theme.colors.border,
         },
+        topBarCompact: {
+          paddingVertical: 4,
+          paddingLeft: 8 + insets.left,
+          paddingRight: 8 + insets.right,
+        },
+        backBtn: { paddingHorizontal: 8, paddingVertical: 2, marginRight: 4 },
+        backText: { fontSize: 20, color: theme.colors.text },
         fileName: { fontSize: 14, fontWeight: '600', color: theme.colors.text, flex: 1, marginRight: 12 },
+        compactStatus: { fontSize: 12, color: theme.colors.textMuted, marginRight: 12 },
         topRight: { flexDirection: 'row', alignItems: 'center' },
         toggleBtn: {
           paddingHorizontal: 12,
@@ -355,6 +371,7 @@ export function EditorScreen({ route, navigation }: Props) {
           justifyContent: 'space-between',
         },
         statusText: { fontSize: 12, color: theme.colors.textMuted },
+        bottomInset: { height: insets.bottom, backgroundColor: theme.colors.surface },
         center: {
           flex: 1,
           justifyContent: 'center',
@@ -406,18 +423,35 @@ export function EditorScreen({ route, navigation }: Props) {
         modalCancel: { marginTop: 8, alignItems: 'center', padding: 10 },
         modalCancelText: { fontSize: 14, fontWeight: '600', color: theme.colors.textMuted },
       }),
-    [theme, insets.bottom],
+    [theme, insets.bottom, insets.left, insets.right],
   );
 
   const saveDisabled = saving || loading || !!loadError || (!dirty && !isNew);
 
   return (
     <KeyboardAvoidingView behavior="padding" style={styles.container}>
-      <View style={styles.topBar}>
+      <StatusBar hidden={landscape} />
+      <View style={[styles.topBar, landscape && styles.topBarCompact]}>
+        {landscape ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Back"
+            style={styles.backBtn}
+            onPress={() => navigation.goBack()}
+          >
+            <Text style={styles.backText}>←</Text>
+          </Pressable>
+        ) : null}
         <Text style={styles.fileName} numberOfLines={1}>
           {path}
         </Text>
         <View style={styles.topRight}>
+          {landscape ? (
+            <Text style={styles.compactStatus} numberOfLines={1}>
+              {online ? '' : 'Offline • '}
+              {wordCount} words
+            </Text>
+          ) : null}
           {markdown ? (
             <Pressable
               accessibilityRole="button"
@@ -480,14 +514,18 @@ export function EditorScreen({ route, navigation }: Props) {
         />
       )}
 
-      <View style={styles.statusBar}>
-        <Text style={styles.statusText}>
-          {online ? (dirty ? 'Draft saved on this device' : '') : 'Offline. Edits stay on this device.'}
-        </Text>
-        <Text style={styles.statusText}>
-          {wordCount} words • {text.length} chars
-        </Text>
-      </View>
+      {landscape ? (
+        <View style={styles.bottomInset} />
+      ) : (
+        <View style={styles.statusBar}>
+          <Text style={styles.statusText}>
+            {online ? (dirty ? 'Draft saved on this device' : '') : 'Offline. Edits stay on this device.'}
+          </Text>
+          <Text style={styles.statusText}>
+            {wordCount} words • {text.length} chars
+          </Text>
+        </View>
+      )}
 
       <Modal visible={saveDialog} transparent animationType="fade" onRequestClose={() => setSaveDialog(false)}>
         <KeyboardAvoidingView behavior="padding" style={styles.modalOverlay}>
