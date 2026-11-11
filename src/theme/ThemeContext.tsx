@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, use, useEffect, useState } from 'react';
 import { useColorScheme } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppearanceMode, Theme, ThemeName } from './types';
@@ -20,8 +20,8 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const systemColorScheme = useColorScheme();
-  const [themeName, setThemeNameState] = useState<ThemeName>('playgrounditor');
-  const [appearanceMode, setAppearanceModeState] = useState<AppearanceMode>('system');
+  const [themeName, setThemeName] = useState<ThemeName>('playgrounditor');
+  const [appearanceMode, setAppearanceMode] = useState<AppearanceMode>('system');
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -30,10 +30,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
         const storedName = await AsyncStorage.getItem(THEME_NAME_KEY);
         const storedMode = await AsyncStorage.getItem(APPEARANCE_MODE_KEY);
         if (storedName && THEME_NAMES.includes(storedName)) {
-          setThemeNameState(storedName as ThemeName);
+          setThemeName(storedName as ThemeName);
         }
         if (storedMode && ['system', 'light', 'dark'].includes(storedMode)) {
-          setAppearanceModeState(storedMode as AppearanceMode);
+          setAppearanceMode(storedMode as AppearanceMode);
         }
       } catch (e: unknown) {
         console.warn('Could not load theme settings', e);
@@ -44,8 +44,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     void loadSettings();
   }, []);
 
-  async function setThemeName(name: ThemeName) {
-    setThemeNameState(name);
+  async function saveThemeName(name: ThemeName) {
+    setThemeName(name);
     try {
       await AsyncStorage.setItem(THEME_NAME_KEY, name);
     } catch (e: unknown) {
@@ -53,8 +53,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  async function setAppearanceMode(mode: AppearanceMode) {
-    setAppearanceModeState(mode);
+  async function saveAppearanceMode(mode: AppearanceMode) {
+    setAppearanceMode(mode);
     try {
       await AsyncStorage.setItem(APPEARANCE_MODE_KEY, mode);
     } catch (e: unknown) {
@@ -76,14 +76,14 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <ThemeContext.Provider value={{ theme, themeName, appearanceMode, setThemeName, setAppearanceMode }}>
+    <ThemeContext value={{ theme, themeName, appearanceMode, setThemeName: saveThemeName, setAppearanceMode: saveAppearanceMode }}>
       {children}
-    </ThemeContext.Provider>
+    </ThemeContext>
   );
 }
 
 export function useTheme(): ThemeContextType {
-  const context = useContext(ThemeContext);
+  const context = use(ThemeContext);
   if (!context) {
     throw new Error('useTheme must be used within a ThemeProvider');
   }

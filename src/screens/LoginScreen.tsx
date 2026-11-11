@@ -22,12 +22,12 @@ export function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [manualToken, setManualToken] = useState('');
-  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pollSession = useRef(0);
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollSessionRef = useRef(0);
 
   useEffect(() => () => {
-    pollSession.current += 1;
-    if (pollTimer.current) clearTimeout(pollTimer.current);
+    pollSessionRef.current += 1;
+    if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
   }, []);
 
   async function handleStartDevice() {
@@ -45,9 +45,9 @@ export function LoginScreen() {
   }
 
   function stopPolling() {
-    pollSession.current += 1;
-    if (pollTimer.current) clearTimeout(pollTimer.current);
-    pollTimer.current = null;
+    pollSessionRef.current += 1;
+    if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+    pollTimerRef.current = null;
   }
 
   function failDeviceFlow(message: string) {
@@ -61,8 +61,8 @@ export function LoginScreen() {
     let intervalMs = Math.max(dc.interval || 5, 5) * 1000;
     const expiresAt = Date.now() + dc.expires_in * 1000;
 
-    pollSession.current += 1;
-    const session = pollSession.current;
+    pollSessionRef.current += 1;
+    const session = pollSessionRef.current;
 
     async function poll() {
       if (Date.now() > expiresAt) {
@@ -71,29 +71,29 @@ export function LoginScreen() {
       }
       try {
         const res = await pollDeviceFlow(dc.device_code);
-        if (session !== pollSession.current) return;
+        if (session !== pollSessionRef.current) return;
         if ('token' in res) {
           // A device code works once, so polling again after a failure here cannot succeed.
           stopPolling();
-          const validating = pollSession.current;
+          const validating = pollSessionRef.current;
           await loginWithToken(res.token).catch((e: unknown) => {
-            if (validating === pollSession.current) failDeviceFlow(errorMessage(e, 'Sign in failed'));
+            if (validating === pollSessionRef.current) failDeviceFlow(errorMessage(e, 'Sign in failed'));
           });
           return;
         }
         if (res.slowDown) intervalMs += SLOW_DOWN_PENALTY_MS;
       } catch (e: unknown) {
-        if (session !== pollSession.current) return;
+        if (session !== pollSessionRef.current) return;
         if (!isTransient(e)) {
           failDeviceFlow(errorMessage(e, 'Sign in failed'));
           return;
         }
         console.warn('Sign in poll failed, retrying', e);
       }
-      pollTimer.current = setTimeout(() => void poll(), intervalMs);
+      pollTimerRef.current = setTimeout(() => void poll(), intervalMs);
     }
 
-    pollTimer.current = setTimeout(() => void poll(), intervalMs);
+    pollTimerRef.current = setTimeout(() => void poll(), intervalMs);
   }
 
   function cancelDeviceFlow() {

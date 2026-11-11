@@ -55,13 +55,13 @@ export function EditorScreen({ route, navigation }: Props) {
   const markdown = isMarkdown(path);
   const dirty = !loading && !loadError && text !== savedText;
 
-  const latest = useRef({ text, savedText, sha, dirty });
-  latest.current = { text, savedText, sha, dirty };
-  const leavingWithoutDraft = useRef(false);
+  const latestRef = useRef({ text, savedText, sha, dirty });
+  latestRef.current = { text, savedText, sha, dirty };
+  const leavingWithoutDraftRef = useRef(false);
 
   const persistDraft = useCallback(async () => {
-    const current = latest.current;
-    if (leavingWithoutDraft.current) return;
+    const current = latestRef.current;
+    if (leavingWithoutDraftRef.current) return;
     if (current.text === current.savedText) {
       await deleteDraft(repoFullName, path);
     } else {
@@ -81,7 +81,7 @@ export function EditorScreen({ route, navigation }: Props) {
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', state => {
-      if (state !== 'active' && latest.current.dirty) persistDraftLogged();
+      if (state !== 'active' && latestRef.current.dirty) persistDraftLogged();
     });
     return () => {
       sub.remove();
@@ -92,7 +92,7 @@ export function EditorScreen({ route, navigation }: Props) {
     setOpenFile(repoFullName, path);
     return () => {
       clearOpenFile();
-      const saved = latest.current.dirty ? persistDraft() : Promise.resolve();
+      const saved = latestRef.current.dirty ? persistDraft() : Promise.resolve();
       saved
         .catch((e: unknown) => console.error('Could not save draft', e))
         .finally(notifyOutbox);
@@ -106,7 +106,7 @@ export function EditorScreen({ route, navigation }: Props) {
         text: 'Discard',
         style: 'destructive',
         onPress: () => {
-          leavingWithoutDraft.current = true;
+          leavingWithoutDraftRef.current = true;
           deleteDraft(repoFullName, path)
             .catch((e: unknown) => console.error('Could not delete draft', e))
             .finally(() => navigation.dispatch(data.action));
@@ -214,7 +214,7 @@ export function EditorScreen({ route, navigation }: Props) {
   }
 
   async function queueSave(mode: SaveMode, committed: string, baseSha?: string) {
-    leavingWithoutDraft.current = true;
+    leavingWithoutDraftRef.current = true;
     await queueCommit({
       repoFullName,
       path,
@@ -230,7 +230,7 @@ export function EditorScreen({ route, navigation }: Props) {
   }
 
   async function handleSave(mode: SaveMode, shaOverride?: string) {
-    const committed = latest.current.text;
+    const committed = latestRef.current.text;
     const baseSha = shaOverride ?? sha;
     setSaving(true);
     setSaveDialog(false);
@@ -238,7 +238,7 @@ export function EditorScreen({ route, navigation }: Props) {
       try {
         await queueSave(mode, committed, baseSha);
       } catch (e: unknown) {
-        leavingWithoutDraft.current = false;
+        leavingWithoutDraftRef.current = false;
         Alert.alert('Could not queue commit', errorMessage(e, 'Could not save on this device'));
       } finally {
         setSaving(false);
@@ -272,7 +272,7 @@ export function EditorScreen({ route, navigation }: Props) {
       if (!isTransient(e)) persistDraftLogged();
       if (isTransient(e)) {
         await queueSave(mode, committed, baseSha).catch((err: unknown) => {
-          leavingWithoutDraft.current = false;
+          leavingWithoutDraftRef.current = false;
           Alert.alert('Could not queue commit', errorMessage(err, 'Could not save on this device'));
         });
       } else if (isConflict(e, !!baseSha)) {

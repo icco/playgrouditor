@@ -36,34 +36,34 @@ function editorColors({ colors }: Theme): EditorColors {
 // The document only crosses the bridge as a message, so file contents never become page markup.
 export function CodeMirrorEditor({ initialValue, onChangeText, path, preview }: Props) {
   const { theme } = useTheme();
-  const webView = useRef<WebView>(null);
-  const latestText = useRef(initialValue);
-  const ready = useRef(false);
+  const webViewRef = useRef<WebView>(null);
+  const latestTextRef = useRef(initialValue);
+  const readyRef = useRef(false);
   const [generation, setGeneration] = useState(0);
   const colors = editorColors(theme);
   const colorsKey = JSON.stringify(colors);
 
   function post(message: EditorInbound) {
-    webView.current?.injectJavaScript(`window.editorBridge.receive(${JSON.stringify(message)});true;`);
+    webViewRef.current?.injectJavaScript(`window.editorBridge.receive(${JSON.stringify(message)});true;`);
   }
 
   useEffect(() => {
-    if (ready.current) post({ type: 'colors', colors: JSON.parse(colorsKey) as EditorColors });
+    if (readyRef.current) post({ type: 'colors', colors: JSON.parse(colorsKey) as EditorColors });
   }, [colorsKey]);
 
   useEffect(() => {
-    if (ready.current) post({ type: 'preview', on: preview });
+    if (readyRef.current) post({ type: 'preview', on: preview });
   }, [preview]);
 
   function onMessage(event: WebViewMessageEvent) {
     const message = JSON.parse(event.nativeEvent.data) as EditorOutbound;
     switch (message.type) {
       case 'ready':
-        ready.current = true;
-        post({ type: 'init', doc: latestText.current, path, preview, colors });
+        readyRef.current = true;
+        post({ type: 'init', doc: latestTextRef.current, path, preview, colors });
         break;
       case 'change':
-        latestText.current = message.doc;
+        latestTextRef.current = message.doc;
         onChangeText(message.doc);
         break;
       case 'error':
@@ -73,7 +73,7 @@ export function CodeMirrorEditor({ initialValue, onChangeText, path, preview }: 
   }
 
   function restart() {
-    ready.current = false;
+    readyRef.current = false;
     setGeneration(g => g + 1);
   }
 
@@ -81,7 +81,7 @@ export function CodeMirrorEditor({ initialValue, onChangeText, path, preview }: 
     <View style={styles.container}>
       <EditorWebView
         key={generation}
-        ref={webView}
+        ref={webViewRef}
         source={{ uri: 'file:///android_asset/editor/index.html' }}
         originWhitelist={['file://*']}
         style={{ backgroundColor: theme.colors.background }}
