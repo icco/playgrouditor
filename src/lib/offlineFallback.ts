@@ -1,6 +1,6 @@
 import { Entry, GitHub, GitHubError, NETWORK_ERROR_STATUS, Repo } from './github';
-import type { CachedFile } from './localFiles';
-import { getKeptRepo, listKeptDir, readKeptFile } from './offlineRepos';
+import { CachedFile, cacheFile } from './localFiles';
+import { getKeptRepo, listKeptDir, readKeptFile, recordCommittedFile } from './offlineRepos';
 
 function isNetworkError(e: unknown): boolean {
   return e instanceof GitHubError && e.status === NETWORK_ERROR_STATUS;
@@ -37,7 +37,12 @@ export async function repoOffline(github: GitHub, fullName: string): Promise<Rep
   }
 }
 
-// Commits update the kept copy too, so for a kept repo it is never older than the recent-file cache.
+// Keeps both local copies on the version GitHub just returned, so neither goes stale behind the other.
+export async function rememberFile(fullName: string, path: string, file: CachedFile): Promise<void> {
+  await Promise.all([cacheFile(fullName, path, file), recordCommittedFile(fullName, path, file)]);
+}
+
+// Reads and commits update the kept copy too, so for a kept repo it is never older than the recent-file cache.
 export async function readFileOffline(fullName: string, path: string, cached: CachedFile | null): Promise<CachedFile | null> {
   try {
     return (await readKeptFile(fullName, path)) ?? cached;

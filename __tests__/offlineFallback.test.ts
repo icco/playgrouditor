@@ -1,7 +1,7 @@
 import { GitHub, GitHubError, NETWORK_ERROR_STATUS } from '../src/lib/github';
-import { clearLocalFiles } from '../src/lib/localFiles';
+import { clearLocalFiles, getCachedFile } from '../src/lib/localFiles';
 import { keepRepo, saveBlob, saveKeptTree } from '../src/lib/offlineRepos';
-import { listDirOffline, readFileOffline, repoOffline } from '../src/lib/offlineFallback';
+import { listDirOffline, readFileOffline, rememberFile, repoOffline } from '../src/lib/offlineFallback';
 
 jest.mock('@react-native-async-storage/async-storage', () => {
   const store = new Map<string, string>();
@@ -57,6 +57,12 @@ describe('offline fallback', () => {
     await expect(readFileOffline(repo, 'docs/a.md', { sha: 'c1', text: 'stale' })).resolves.toEqual({ sha: 'a1', text: 'hello' });
     await expect(readFileOffline('bob/other', 'x.md', { sha: 'c1', text: 'cached' })).resolves.toEqual({ sha: 'c1', text: 'cached' });
     await expect(readFileOffline('bob/other', 'x.md', null)).resolves.toBeNull();
+  });
+
+  it('opens the version last read online, not the older kept copy', async () => {
+    await rememberFile(repo, 'docs/a.md', { sha: 'a2', text: 'newer' });
+    const cached = await getCachedFile(repo, 'docs/a.md');
+    await expect(readFileOffline(repo, 'docs/a.md', cached)).resolves.toEqual({ sha: 'a2', text: 'newer' });
   });
 
   it('falls back to the cache when the blob is not stored', async () => {

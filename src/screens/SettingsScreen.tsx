@@ -236,7 +236,7 @@ export function SettingsScreen() {
             <View style={styles.rowWrap}>
               <TouchableOpacity
                 style={styles.optionBtn}
-                disabled={!github || r.syncing}
+                disabled={!github}
                 onPress={() => github && refreshOffline(github, r.fullName)}
               >
                 <Text style={styles.optionText}>Refresh now</Text>

@@ -18,11 +18,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../theme/ThemeContext';
 import { GitHubError, NETWORK_ERROR_STATUS, Repo, isConflict, isMarkdown, isTransient } from '../lib/github';
-import { readFileOffline } from '../lib/offlineFallback';
-import { recordCommittedFile } from '../lib/offlineRepos';
+import { readFileOffline, rememberFile } from '../lib/offlineFallback';
 import { clearOpenFile, notifyOutbox, queueCommit, setOpenFile } from '../lib/outbox';
 import { resolveEditorStart } from '../lib/editorStart';
-import { cacheFile, deleteDraft, getCachedFile, getDraft, saveDraft } from '../lib/localFiles';
+import { deleteDraft, getCachedFile, getDraft, saveDraft } from '../lib/localFiles';
 import { errorMessage } from '../lib/errors';
 import { queryClient, useIsOnline } from '../lib/queryClient';
 import { CodeMirrorEditor } from '../components/CodeMirrorEditor';
@@ -142,7 +141,9 @@ export function EditorScreen({ route, navigation }: Props) {
           try {
             const file = await github.read(repoFullName, path, defaultBranch);
             base = { sha: file.sha, text: file.text };
-            cacheFile(repoFullName, path, base).catch((e: unknown) => console.warn('Could not cache file', e));
+            rememberFile(repoFullName, path, base).catch((e: unknown) =>
+              console.warn('Could not save the file on this device', e),
+            );
           } catch (e: unknown) {
             fetchError = e;
           }
@@ -260,11 +261,8 @@ export function EditorScreen({ route, navigation }: Props) {
       });
       if (mode === 'direct') {
         setSha(res.sha);
-        cacheFile(repoFullName, path, { sha: res.sha, text: committed }).catch((e: unknown) =>
-          console.warn('Could not cache file', e),
-        );
-        recordCommittedFile(repoFullName, path, { sha: res.sha, text: committed }).catch((e: unknown) =>
-          console.warn('Could not update the offline copy', e),
+        rememberFile(repoFullName, path, { sha: res.sha, text: committed }).catch((e: unknown) =>
+          console.warn('Could not save the file on this device', e),
         );
       }
       finishSave(committed, res.prUrl);
