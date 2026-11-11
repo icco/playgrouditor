@@ -108,6 +108,37 @@ describe('offline repos', () => {
     expect(keys.filter(k => k.startsWith('@playgrounditor:offline:'))).toEqual([]);
   });
 
+  it('does not let concurrent updates restore an unkept repo', async () => {
+    await keepRepo('alice/blog', 'main');
+    await Promise.all([
+      updateKeptRepo(repo, { pending: 1 }),
+      unkeepRepo(repo),
+      updateKeptRepo(repo, { pending: 2 }),
+      keepRepo('alice/wiki', 'main'),
+      updateKeptRepo('alice/blog', { pending: 3 }),
+    ]);
+    const repos = await listKeptRepos();
+    expect(repos.map(r => r.fullName)).toEqual(['alice/blog', 'alice/wiki']);
+    expect(repos[0].pending).toBe(3);
+  });
+
+  it('does not let an update restore repos after clearLocalFiles', async () => {
+    await Promise.all([updateKeptRepo(repo, { pending: 1 }), clearLocalFiles(), updateKeptRepo(repo, { pending: 2 })]);
+    await expect(listKeptRepos()).resolves.toEqual([]);
+  });
+
+  it('lists a symlink as a symlink', async () => {
+    await saveKeptTree(repo, [{ path: 'link.md', type: 'blob', sha: 'l1', size: 6, mode: '120000' }]);
+    expect((await listKeptDir(repo, ''))?.map(e => e.type)).toEqual(['symlink']);
+  });
+
+  it('adds missing parent folders for a committed nested file', async () => {
+    await recordCommittedFile(repo, 'new/deep/note.md', { sha: 'n1', text: 'hi' });
+    expect((await listKeptDir(repo, ''))?.map(e => e.path)).toEqual(['docs', 'new', 'top.md']);
+    expect((await listKeptDir(repo, 'new'))?.map(e => [e.path, e.type])).toEqual([['new/deep', 'dir']]);
+    await expect(readKeptFile(repo, 'new/deep/note.md')).resolves.toEqual({ sha: 'n1', text: 'hi' });
+  });
+
   it('notifies subscribers on keep', async () => {
     const listener = jest.fn();
     const unsubscribe = subscribeKeptRepos(listener);

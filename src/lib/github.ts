@@ -42,6 +42,7 @@ export interface TreeEntry {
   type: 'blob' | 'tree' | 'commit';
   sha: string;
   size?: number;
+  mode?: string;
 }
 
 export interface FileContent {
@@ -155,7 +156,7 @@ export class GitHub {
     const res = await this.req<{ sha: string; truncated: boolean; tree: TreeEntry[] }>(
       `/repos/${fullName}/git/trees/${encodeURIComponent(ref)}?recursive=1`,
     );
-    const entries = res.tree.map(({ path, type, sha, size }) => ({ path, type, sha, size }));
+    const entries = res.tree.map(({ path, type, sha, size, mode }) => ({ path, type, sha, size, mode }));
     return { sha: res.sha, truncated: res.truncated, entries };
   }
 

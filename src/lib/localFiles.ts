@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { OFFLINE_PREFIX } from './offlineRepos';
+import { clearOfflineData } from './offlineRepos';
 
 const DRAFT_PREFIX = '@playgrounditor:draft:';
 const FILE_PREFIX = '@playgrounditor:file:';
@@ -87,7 +87,7 @@ export async function cacheFile(repoFullName: string, path: string, file: Cached
 
 export async function clearLocalFiles(): Promise<void> {
   const keys = (await AsyncStorage.getAllKeys()).filter(
-    k => k.startsWith(DRAFT_PREFIX) || k.startsWith(FILE_PREFIX) || k === FILE_INDEX_KEY || k.startsWith(OFFLINE_PREFIX),
+    k => k.startsWith(DRAFT_PREFIX) || k.startsWith(FILE_PREFIX) || k === FILE_INDEX_KEY,
   );
-  await Promise.all(keys.map(k => AsyncStorage.removeItem(k)));
+  await Promise.all([...keys.map(k => AsyncStorage.removeItem(k)), clearOfflineData()]);
 }

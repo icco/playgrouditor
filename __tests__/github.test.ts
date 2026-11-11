@@ -29,7 +29,7 @@ describe('GitHub client', () => {
     );
     const tree = await new GitHub('token', fetcher).tree('alice/notes', 'main');
     expect(fetcher).toHaveBeenCalledWith(expect.stringContaining('/repos/alice/notes/git/trees/main?recursive=1'), expect.anything());
-    expect(tree).toEqual({ sha: 't1', truncated: false, entries: [{ path: 'a.md', type: 'blob', sha: 'b1', size: 3 }] });
+    expect(tree).toEqual({ sha: 't1', truncated: false, entries: [{ path: 'a.md', type: 'blob', sha: 'b1', size: 3, mode: '100644' }] });
   });
 
   it('decodes a blob and returns null for non-UTF-8', async () => {
