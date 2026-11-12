@@ -1,3 +1,15 @@
+# [1.3.0](https://github.com/icco/[secure]/compare/v1.2.1...v1.3.0) (2026-11-12)
+
+
+### Bug Fixes
+
+* give the editor most of the screen in landscape ([#18](https://github.com/icco/[secure]/issues/18)) ([6e30290](https://github.com/icco/[secure]/commit/6e30290472c298c105b2eeb0b5e0a88dbed07647))
+
+
+### Features
+
+* keep repos offline with hourly wi-fi refresh ([#17](https://github.com/icco/[secure]/issues/17)) ([323952e](https://github.com/icco/[secure]/commit/323952e0fa52249b6fb67a83d7c13913695ef2de))
+
 ## [1.2.1](https://github.com/icco/[secure]/compare/v1.2.0...v1.2.1) (2026-11-08)
 
 # [1.2.0](https://github.com/icco/[secure]/compare/v1.1.0...v1.2.0) (2026-10-31)
