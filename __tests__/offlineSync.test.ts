@@ -67,6 +67,19 @@ describe('offline sync', () => {
     await expect(getKeptModified(repo)).resolves.toEqual({ 'p0.md': 'date-p0.md', 'p1.md': 'date-p1.md', 'p2.md': 'newer' });
   });
 
+  it('stops dating and skips completion once told to stop', async () => {
+    const gh = fakeGitHub(blobs(450));
+    let stop = false;
+    gh.modifiedDates.mockImplementation((_: string, paths: string[]) => {
+      stop = true;
+      return Promise.resolve(Object.fromEntries(paths.map(p => [p, `date-${p}`])));
+    });
+    await syncRepo(gh as unknown as GitHub, repo, () => stop);
+    expect(gh.modifiedDates).toHaveBeenCalledTimes(1);
+    expect(await getKeptRepo(repo)).not.toHaveProperty('syncedAt');
+    expect(Object.keys(await getKeptModified(repo))).toHaveLength(200);
+  });
+
   it('skips binaries, large files and non-UTF-8', async () => {
     const gh = fakeGitHub(
       [

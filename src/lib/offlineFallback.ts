@@ -1,14 +1,14 @@
 import { Entry, GitHub, GitHubError, NETWORK_ERROR_STATUS, Repo } from './github';
 import { CachedFile, cacheFile } from './localFiles';
 import {
+  KeptDate,
+  applyDates,
   getKeptDates,
   getKeptModified,
   getKeptRepo,
   listKeptDir,
   readKeptFile,
   recordCommittedFile,
-  saveKeptModified,
-  whileKept,
 } from './offlineRepos';
 
 function isNetworkError(e: unknown): boolean {
@@ -33,22 +33,25 @@ export async function modifiedDatesOffline(github: GitHub, fullName: string, pat
   return Object.fromEntries(paths.filter(p => kept[p]).map(p => [p, kept[p]]));
 }
 
+function datesFor(entries: Entry[], stored: Record<string, KeptDate>): Record<string, string> {
+  return Object.fromEntries(entries.filter(e => stored[e.path]).map(e => [e.path, stored[e.path].date]));
+}
+
+// Returns every stored date for the entries, so the screen can overlay it without losing older lookups.
 export async function refreshKeptDates(github: GitHub, fullName: string, entries: Entry[], ref: string): Promise<Record<string, string>> {
   const known = await getKeptDates(fullName);
   const stale = entries.filter(e => known[e.path]?.sha !== e.sha);
-  if (!stale.length) return {};
+  if (!stale.length) return datesFor(entries, known);
   let fresh: Record<string, string>;
   try {
     fresh = await github.modifiedDates(fullName, stale.map(e => e.path), ref);
   } catch (e: unknown) {
     if (!isNetworkError(e)) throw e;
-    return {};
+    return datesFor(entries, known);
   }
-  await whileKept(fullName, async () => {
-    const updates = Object.fromEntries(stale.filter(e => fresh[e.path]).map(e => [e.path, { sha: e.sha, date: fresh[e.path] }]));
-    await saveKeptModified(fullName, { ...(await getKeptDates(fullName)), ...updates });
-  });
-  return fresh;
+  const updates = Object.fromEntries(stale.filter(e => fresh[e.path]).map(e => [e.path, { sha: e.sha, date: fresh[e.path] }]));
+  const stored = await applyDates(fullName, known, updates);
+  return stored ? datesFor(entries, stored) : {};
 }
 
 export async function repoOffline(github: GitHub, fullName: string): Promise<Repo> {

@@ -66,18 +66,17 @@ export function FileBrowserScreen({ route, navigation }: Props) {
     placeholderData: keepPreviousData,
   });
   const refreshQuery = useQuery({
-    queryKey: ['modified', repoFullName, currentPath, defaultBranch, 'refresh', dirQuery.dataUpdatedAt],
+    queryKey: ['modified', repoFullName, currentPath, defaultBranch, 'refresh', kept?.syncedAt, dirQuery.dataUpdatedAt],
     queryFn: () => refreshKeptDates(github!, repoFullName, dirQuery.data!, defaultBranch!),
     enabled: isFocused && !!github && !!defaultBranch && sortBy === 'modified' && !!kept && !!dirQuery.data?.length,
     staleTime: MODIFIED_STALE_MS,
-    placeholderData: keepPreviousData,
   });
 
   const entries = useMemo(() => {
-    const dates = sortBy === 'modified' ? { ...modifiedQuery.data, ...refreshQuery.data } : undefined;
+    const dates = sortBy === 'modified' ? { ...modifiedQuery.data, ...(kept ? refreshQuery.data : undefined) } : undefined;
     const withDates = (dirQuery.data ?? []).map(e => ({ ...e, modified: dates?.[e.path] }));
     return sortEntries(withDates, sortBy);
-  }, [dirQuery.data, modifiedQuery.data, refreshQuery.data, sortBy]);
+  }, [dirQuery.data, modifiedQuery.data, refreshQuery.data, kept, sortBy]);
 
   const failure = repoQuery.error ?? dirQuery.error ?? (sortBy === 'modified' ? (modifiedQuery.error ?? refreshQuery.error) : null);
   const loading = !dirQuery.data && (repoQuery.isLoading || dirQuery.isLoading);

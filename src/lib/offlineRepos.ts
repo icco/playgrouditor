@@ -223,14 +223,45 @@ export async function recordCommittedFile(fullName: string, path: string, file: 
     );
     await saveBlob(fullName, file.sha, file.text);
     await saveKeptTree(fullName, [...rest, { path, type: 'blob', sha: file.sha, size: file.text.length }]);
-    const date = new Date().toISOString();
-    const parts = path.split('/');
-    // Folder shas are unknown here, so the next sync re-dates them.
-    const touched = parts.map((_, i): [string, KeptDate] => [
-      parts.slice(0, i + 1).join('/'),
-      { sha: i === parts.length - 1 ? file.sha : '', date },
-    ]);
+  });
+  if (written) notify();
+}
+
+// Only for a commit made from this device; reads go through recordCommittedFile and keep their dates.
+export async function recordModified(fullName: string, path: string, sha: string): Promise<void> {
+  const date = new Date().toISOString();
+  const parts = path.split('/');
+  // Folder shas are unknown here, so the next sync or refresh re-dates them.
+  const touched = parts.map((_, i): [string, KeptDate] => [parts.slice(0, i + 1).join('/'), { sha: i === parts.length - 1 ? sha : '', date }]);
+  const written = await whileKept(fullName, async () => {
     await saveKeptModified(fullName, { ...(await getKeptDates(fullName)), ...Object.fromEntries(touched) });
   });
   if (written) notify();
+}
+
+function sameDate(a: KeptDate | undefined, b: KeptDate | undefined): boolean {
+  return a?.sha === b?.sha && a?.date === b?.date;
+}
+
+// Lookups take seconds, so a path another writer re-dated since the snapshot keeps that newer date.
+export async function applyDates(
+  fullName: string,
+  snapshot: Record<string, KeptDate>,
+  updates: Record<string, KeptDate>,
+  drop: (path: string) => boolean = () => false,
+): Promise<Record<string, KeptDate> | null> {
+  let result: Record<string, KeptDate> | null = null;
+  await whileKept(fullName, async () => {
+    const current = await getKeptDates(fullName);
+    const next: Record<string, KeptDate> = {};
+    for (const [path, d] of Object.entries(current)) {
+      if (!drop(path) || !sameDate(d, snapshot[path])) next[path] = d;
+    }
+    for (const [path, d] of Object.entries(updates)) {
+      if (sameDate(current[path], snapshot[path])) next[path] = d;
+    }
+    await saveKeptModified(fullName, next);
+    result = next;
+  });
+  return result;
 }

@@ -21,6 +21,7 @@ import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../theme/ThemeContext';
 import { GitHubError, NETWORK_ERROR_STATUS, Repo, isConflict, isMarkdown, isTransient } from '../lib/github';
 import { readFileOffline, rememberFile } from '../lib/offlineFallback';
+import { recordModified } from '../lib/offlineRepos';
 import { clearOpenFile, notifyOutbox, queueCommit, setOpenFile } from '../lib/outbox';
 import { resolveEditorStart } from '../lib/editorStart';
 import { deleteDraft, getCachedFile, getDraft, saveDraft } from '../lib/localFiles';
@@ -272,6 +273,7 @@ export function EditorScreen({ route, navigation }: Props) {
         rememberFile(repoFullName, path, { sha: res.sha, text: committed }).catch((e: unknown) =>
           console.warn('Could not save the file on this device', e),
         );
+        recordModified(repoFullName, path, res.sha).catch((e: unknown) => console.warn('Could not update the offline dates', e));
       }
       finishSave(committed, res.prUrl);
     } catch (e: unknown) {

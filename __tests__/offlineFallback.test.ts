@@ -1,6 +1,6 @@
 import { GitHub, GitHubError, NETWORK_ERROR_STATUS } from '../src/lib/github';
 import { clearLocalFiles, getCachedFile } from '../src/lib/localFiles';
-import { keepRepo, recordCommittedFile, saveBlob, saveKeptModified, saveKeptTree } from '../src/lib/offlineRepos';
+import { keepRepo, recordModified, saveBlob, saveKeptModified, saveKeptTree } from '../src/lib/offlineRepos';
 import { listDirOffline, modifiedDatesOffline, readFileOffline, refreshKeptDates, rememberFile, repoOffline } from '../src/lib/offlineFallback';
 
 jest.mock('@react-native-async-storage/async-storage', () => {
@@ -105,10 +105,31 @@ describe('offline fallback', () => {
     await expect(refreshKeptDates(offline, repo, entries, 'trunk')).resolves.toEqual({});
   });
 
-  it('dates a committed file and its folders as now', async () => {
-    await recordCommittedFile(repo, 'docs/a.md', { sha: 'a2', text: 'new' });
+  it('dates a committed file and its folders as now, but not a read', async () => {
+    await saveKeptModified(repo, { 'docs/a.md': { sha: 'a1', date: '2026-01-01T00:00:00Z' } });
+    await rememberFile(repo, 'docs/a.md', { sha: 'a1', text: 'hello' });
+    await expect(modifiedDatesOffline(offline, repo, ['docs/a.md'], 'trunk')).resolves.toEqual({ 'docs/a.md': '2026-01-01T00:00:00Z' });
+    await recordModified(repo, 'docs/a.md', 'a2');
     const dates = await modifiedDatesOffline(offline, repo, ['docs', 'docs/a.md'], 'trunk');
     expect(Date.now() - new Date(dates['docs/a.md']).getTime()).toBeLessThan(60_000);
     expect(dates.docs).toBe(dates['docs/a.md']);
+  });
+
+  it('keeps a commit date recorded while a refresh was in flight', async () => {
+    const gh = new GitHub('t');
+    jest.spyOn(gh, 'modifiedDates').mockImplementation(async () => {
+      await recordModified(repo, 'docs/a.md', 'a2');
+      return { 'docs/a.md': '2020-01-01T00:00:00Z' };
+    });
+    const entries = [{ name: 'a.md', path: 'docs/a.md', type: 'file' as const, sha: 'a1' }];
+    const dates = await refreshKeptDates(gh, repo, entries, 'trunk');
+    expect(dates['docs/a.md']).not.toBe('2020-01-01T00:00:00Z');
+    await expect(modifiedDatesOffline(gh, repo, ['docs/a.md'], 'trunk')).resolves.toEqual(dates);
+  });
+
+  it('returns every stored date for the folder when nothing is stale', async () => {
+    await saveKeptModified(repo, { 'docs/a.md': { sha: 'a1', date: '2026-01-01T00:00:00Z' } });
+    const entries = [{ name: 'a.md', path: 'docs/a.md', type: 'file' as const, sha: 'a1' }];
+    await expect(refreshKeptDates(offline, repo, entries, 'trunk')).resolves.toEqual({ 'docs/a.md': '2026-01-01T00:00:00Z' });
   });
 });
