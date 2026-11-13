@@ -7,6 +7,7 @@ const REPOS_KEY = `${OFFLINE_PREFIX}repos`;
 const TREE_PREFIX = `${OFFLINE_PREFIX}tree:`;
 const BLOB_PREFIX = `${OFFLINE_PREFIX}blob:`;
 const SKIPPED_PREFIX = `${OFFLINE_PREFIX}skipped:`;
+const MODIFIED_PREFIX = `${OFFLINE_PREFIX}modified:`;
 const SYMLINK_MODE = '120000';
 
 export interface KeptRepo {
@@ -19,6 +20,11 @@ export interface KeptRepo {
   pending: number;
   syncing?: boolean;
   error?: string;
+}
+
+export interface KeptDate {
+  sha: string;
+  date: string;
 }
 
 const listeners = new Set<() => void>();
@@ -85,7 +91,11 @@ export function unkeepRepo(fullName: string): Promise<void> {
     await writeKeptRepos((await listKeptRepos()).filter(r => r.fullName !== fullName));
     const prefix = `${BLOB_PREFIX}${fullName}:`;
     const keys = (await AsyncStorage.getAllKeys()).filter(
-      k => k.startsWith(prefix) || k === TREE_PREFIX + fullName || k === SKIPPED_PREFIX + fullName,
+      k =>
+        k.startsWith(prefix) ||
+        k === TREE_PREFIX + fullName ||
+        k === SKIPPED_PREFIX + fullName ||
+        k === MODIFIED_PREFIX + fullName,
     );
     await Promise.all(keys.map(k => AsyncStorage.removeItem(k)));
   });
@@ -121,6 +131,18 @@ export function getKeptTree(fullName: string): Promise<TreeEntry[] | null> {
 
 export async function saveKeptTree(fullName: string, entries: TreeEntry[]): Promise<void> {
   await AsyncStorage.setItem(TREE_PREFIX + fullName, JSON.stringify(entries));
+}
+
+export async function getKeptDates(fullName: string): Promise<Record<string, KeptDate>> {
+  return (await readJson<Record<string, KeptDate>>(MODIFIED_PREFIX + fullName)) ?? {};
+}
+
+export async function getKeptModified(fullName: string): Promise<Record<string, string>> {
+  return Object.fromEntries(Object.entries(await getKeptDates(fullName)).map(([path, d]) => [path, d.date]));
+}
+
+export async function saveKeptModified(fullName: string, dates: Record<string, KeptDate>): Promise<void> {
+  await AsyncStorage.setItem(MODIFIED_PREFIX + fullName, JSON.stringify(dates));
 }
 
 export async function hasBlob(fullName: string, sha: string): Promise<boolean> {
@@ -201,6 +223,14 @@ export async function recordCommittedFile(fullName: string, path: string, file: 
     );
     await saveBlob(fullName, file.sha, file.text);
     await saveKeptTree(fullName, [...rest, { path, type: 'blob', sha: file.sha, size: file.text.length }]);
+    const date = new Date().toISOString();
+    const parts = path.split('/');
+    // Folder shas are unknown here, so the next sync re-dates them.
+    const touched = parts.map((_, i): [string, KeptDate] => [
+      parts.slice(0, i + 1).join('/'),
+      { sha: i === parts.length - 1 ? file.sha : '', date },
+    ]);
+    await saveKeptModified(fullName, { ...(await getKeptDates(fullName)), ...Object.fromEntries(touched) });
   });
   if (written) notify();
 }

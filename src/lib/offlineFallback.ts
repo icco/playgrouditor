@@ -1,6 +1,6 @@
 import { Entry, GitHub, GitHubError, NETWORK_ERROR_STATUS, Repo } from './github';
 import { CachedFile, cacheFile } from './localFiles';
-import { getKeptRepo, listKeptDir, readKeptFile, recordCommittedFile } from './offlineRepos';
+import { getKeptModified, getKeptRepo, listKeptDir, readKeptFile, recordCommittedFile } from './offlineRepos';
 
 function isNetworkError(e: unknown): boolean {
   return e instanceof GitHubError && e.status === NETWORK_ERROR_STATUS;
@@ -14,6 +14,21 @@ export async function listDirOffline(github: GitHub, fullName: string, path: str
     const kept = await listKeptDir(fullName, path);
     if (!kept) throw e;
     return kept;
+  }
+}
+
+// Kept repos answer from the dates the sync stores, so only paths it has not dated yet go to GitHub.
+export async function modifiedDatesOffline(github: GitHub, fullName: string, paths: string[], ref: string): Promise<Record<string, string>> {
+  if (!(await getKeptRepo(fullName))) return github.modifiedDates(fullName, paths, ref);
+  const kept = await getKeptModified(fullName);
+  const dates = Object.fromEntries(paths.filter(p => kept[p]).map(p => [p, kept[p]]));
+  const missing = paths.filter(p => !kept[p]);
+  if (!missing.length) return dates;
+  try {
+    return { ...dates, ...(await github.modifiedDates(fullName, missing, ref)) };
+  } catch (e: unknown) {
+    if (!isNetworkError(e)) throw e;
+    return dates;
   }
 }
 

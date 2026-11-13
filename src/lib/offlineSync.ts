@@ -1,11 +1,14 @@
 import { GitHub, GitHubError, TreeEntry, isEditable } from './github';
 import {
   deleteUnreferencedBlobs,
+  KeptDate,
+  getKeptDates,
   getSkippedShas,
   hasBlob,
   isSymlink,
   listKeptRepos,
   saveBlob,
+  saveKeptModified,
   saveKeptTree,
   saveSkippedShas,
   updateKeptRepo,
@@ -88,6 +91,7 @@ async function runSync(github: GitHub, fullName: string, shouldStop: () => boole
       await deleteUnreferencedBlobs(fullName, new Set(stored.map(f => f.sha)));
       await saveSkippedShas(fullName, new Set([...skipped].filter(sha => treeShas.has(sha))));
     });
+    await syncDates(github, fullName, tree.entries, repo.default_branch);
     await updateKeptRepo(fullName, {
       treeSha: tree.sha,
       syncedAt: new Date().toISOString(),
@@ -101,4 +105,21 @@ async function runSync(github: GitHub, fullName: string, shouldStop: () => boole
   } finally {
     await updateKeptRepo(fullName, { syncing: false });
   }
+}
+
+// An unchanged sha means no commit touched that path, so only changed paths cost a history lookup.
+async function syncDates(github: GitHub, fullName: string, entries: TreeEntry[], ref: string): Promise<void> {
+  const known = await getKeptDates(fullName);
+  const stale = entries.filter(e => known[e.path]?.sha !== e.sha).map(e => e.path);
+  if (!stale.length) return;
+  const fresh = await github.modifiedDates(fullName, stale, ref);
+  await whileKept(fullName, async () => {
+    const current = await getKeptDates(fullName);
+    const dates: Record<string, KeptDate> = {};
+    for (const e of entries) {
+      const date = fresh[e.path] ?? (current[e.path]?.sha === e.sha ? current[e.path].date : undefined);
+      if (date) dates[e.path] = { sha: e.sha, date };
+    }
+    await saveKeptModified(fullName, dates);
+  });
 }

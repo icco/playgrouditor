@@ -1,7 +1,7 @@
 import { GitHub, GitHubError, NETWORK_ERROR_STATUS } from '../src/lib/github';
 import { clearLocalFiles, getCachedFile } from '../src/lib/localFiles';
-import { keepRepo, saveBlob, saveKeptTree } from '../src/lib/offlineRepos';
-import { listDirOffline, readFileOffline, rememberFile, repoOffline } from '../src/lib/offlineFallback';
+import { keepRepo, recordCommittedFile, saveBlob, saveKeptModified, saveKeptTree } from '../src/lib/offlineRepos';
+import { listDirOffline, modifiedDatesOffline, readFileOffline, rememberFile, repoOffline } from '../src/lib/offlineFallback';
 
 jest.mock('@react-native-async-storage/async-storage', () => {
   const store = new Map<string, string>();
@@ -69,5 +69,26 @@ describe('offline fallback', () => {
     await saveKeptTree(repo, [{ path: 'big.md', type: 'blob', sha: 'big', size: 2_000_000 }]);
     await expect(readFileOffline(repo, 'big.md', { sha: 'c1', text: 'cached' })).resolves.toEqual({ sha: 'c1', text: 'cached' });
     await expect(readFileOffline(repo, 'big.md', null)).rejects.toThrow('This file is not stored offline.');
+  });
+
+  it('dates a kept folder from the offline copy, fetching only paths it lacks', async () => {
+    await saveKeptModified(repo, { docs: { sha: 't1', date: '2026-01-01T00:00:00Z' } });
+    const gh = new GitHub('t');
+    const fetched = jest.spyOn(gh, 'modifiedDates').mockResolvedValue({ 'docs/new.md': '2026-02-01T00:00:00Z' });
+    const dates = await modifiedDatesOffline(gh, repo, ['docs', 'docs/new.md'], 'trunk');
+    expect(fetched).toHaveBeenCalledWith(repo, ['docs/new.md'], 'trunk');
+    expect(dates).toEqual({ docs: '2026-01-01T00:00:00Z', 'docs/new.md': '2026-02-01T00:00:00Z' });
+  });
+
+  it('returns kept dates offline', async () => {
+    await saveKeptModified(repo, { docs: { sha: 't1', date: '2026-01-01T00:00:00Z' } });
+    await expect(modifiedDatesOffline(offline, repo, ['docs', 'docs/a.md'], 'trunk')).resolves.toEqual({ docs: '2026-01-01T00:00:00Z' });
+  });
+
+  it('dates a committed file and its folders as now', async () => {
+    await recordCommittedFile(repo, 'docs/a.md', { sha: 'a2', text: 'new' });
+    const dates = await modifiedDatesOffline(offline, repo, ['docs', 'docs/a.md'], 'trunk');
+    expect(Date.now() - new Date(dates['docs/a.md']).getTime()).toBeLessThan(60_000);
+    expect(dates.docs).toBe(dates['docs/a.md']);
   });
 });
