@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GitHub, GitHubError, TreeEntry } from '../src/lib/github';
 import { clearLocalFiles } from '../src/lib/localFiles';
-import { getKeptRepo, getKeptTree, hasBlob, keepRepo, readKeptFile, saveBlob, saveKeptTree, unkeepRepo } from '../src/lib/offlineRepos';
+import { getKeptModified, getKeptRepo, getKeptTree, hasBlob, keepRepo, readKeptFile, saveBlob, saveKeptTree, unkeepRepo } from '../src/lib/offlineRepos';
 import { syncAll, syncRepo } from '../src/lib/offlineSync';
 
 jest.mock('@react-native-async-storage/async-storage', () => {
@@ -31,6 +31,9 @@ function fakeGitHub(entries: TreeEntry[], opts: { truncated?: boolean; texts?: R
     blob: jest.fn<Promise<string | null>, [string, string]>((_: string, sha: string) =>
       Promise.resolve(opts.texts && sha in opts.texts ? opts.texts[sha] : `t-${sha}`),
     ),
+    modifiedDates: jest.fn<Promise<Record<string, string>>, [string, string[], string]>((_: string, paths: string[]) =>
+      Promise.resolve(Object.fromEntries(paths.map(p => [p, `date-${p}`]))),
+    ),
   };
   return gh;
 }
@@ -50,6 +53,31 @@ describe('offline sync', () => {
     expect(kept).toMatchObject({ treeSha: 'tree1', fileCount: 3, bytes: 6, pending: 0, syncing: false });
     expect(kept?.syncedAt).toBeDefined();
     await expect(readKeptFile(repo, 'p2.md')).resolves.toEqual({ sha: 's2', text: 't-s2' });
+  });
+
+  it('dates only paths whose sha changed since the last sync', async () => {
+    const gh = fakeGitHub(blobs(3));
+    await syncRepo(gh as unknown as GitHub, repo);
+    expect(gh.modifiedDates.mock.calls[0][1]).toEqual(['p0.md', 'p1.md', 'p2.md']);
+    const changed = [...blobs(2), { path: 'p2.md', type: 'blob' as const, sha: 's2b', size: 2 }];
+    gh.tree.mockResolvedValue({ sha: 'tree2', truncated: false, entries: changed });
+    gh.modifiedDates.mockResolvedValueOnce({ 'p2.md': 'newer' });
+    await syncRepo(gh as unknown as GitHub, repo);
+    expect(gh.modifiedDates.mock.calls[1][1]).toEqual(['p2.md']);
+    await expect(getKeptModified(repo)).resolves.toEqual({ 'p0.md': 'date-p0.md', 'p1.md': 'date-p1.md', 'p2.md': 'newer' });
+  });
+
+  it('stops dating and skips completion once told to stop', async () => {
+    const gh = fakeGitHub(blobs(450));
+    let stop = false;
+    gh.modifiedDates.mockImplementation((_: string, paths: string[]) => {
+      stop = true;
+      return Promise.resolve(Object.fromEntries(paths.map(p => [p, `date-${p}`])));
+    });
+    await syncRepo(gh as unknown as GitHub, repo, () => stop);
+    expect(gh.modifiedDates).toHaveBeenCalledTimes(1);
+    expect(await getKeptRepo(repo)).not.toHaveProperty('syncedAt');
+    expect(Object.keys(await getKeptModified(repo))).toHaveLength(200);
   });
 
   it('skips binaries, large files and non-UTF-8', async () => {

@@ -3,7 +3,8 @@ import { GITHUB_CLIENT_ID } from '../config';
 
 const API = 'https://api.github.com';
 const REQUEST_TIMEOUT_MS = 30_000;
-const MODIFIED_BATCH_SIZE = 100;
+const MODIFIED_BATCH_SIZE = 50;
+const MODIFIED_CONCURRENCY = 4;
 
 export const NETWORK_ERROR_STATUS = 0;
 // The commit landed, so this must never count as transient and be sent twice.
@@ -111,16 +112,20 @@ export class GitHub {
     return this.req<Repo>(`/repos/${fullName}`);
   }
 
-  // Sequential batches, because a parallel burst trips GitHub's secondary rate limit.
+  // GitHub resolves each path's history serially within a query, so a few smaller batches at once finish far sooner.
   async modifiedDates(fullName: string, paths: string[], ref: string): Promise<Record<string, string>> {
+    const batches: string[][] = [];
+    for (let i = 0; i < paths.length; i += MODIFIED_BATCH_SIZE) batches.push(paths.slice(i, i + MODIFIED_BATCH_SIZE));
     const dates: Record<string, string> = {};
-    for (let i = 0; i < paths.length; i += MODIFIED_BATCH_SIZE) {
-      const batch = paths.slice(i, i + MODIFIED_BATCH_SIZE);
-      const history = await this.batchHistory(fullName, batch, ref);
-      batch.forEach((path, j) => {
-        const date = history?.[`f${j}`]?.nodes[0]?.committedDate;
-        if (date) dates[path] = date;
-      });
+    for (let i = 0; i < batches.length; i += MODIFIED_CONCURRENCY) {
+      const wave = batches.slice(i, i + MODIFIED_CONCURRENCY);
+      const histories = await Promise.all(wave.map(batch => this.batchHistory(fullName, batch, ref)));
+      wave.forEach((batch, b) =>
+        batch.forEach((path, j) => {
+          const date = histories[b]?.[`f${j}`]?.nodes[0]?.committedDate;
+          if (date) dates[path] = date;
+        }),
+      );
     }
     return dates;
   }

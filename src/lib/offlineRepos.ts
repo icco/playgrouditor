@@ -7,6 +7,7 @@ const REPOS_KEY = `${OFFLINE_PREFIX}repos`;
 const TREE_PREFIX = `${OFFLINE_PREFIX}tree:`;
 const BLOB_PREFIX = `${OFFLINE_PREFIX}blob:`;
 const SKIPPED_PREFIX = `${OFFLINE_PREFIX}skipped:`;
+const MODIFIED_PREFIX = `${OFFLINE_PREFIX}modified:`;
 const SYMLINK_MODE = '120000';
 
 export interface KeptRepo {
@@ -19,6 +20,11 @@ export interface KeptRepo {
   pending: number;
   syncing?: boolean;
   error?: string;
+}
+
+export interface KeptDate {
+  sha: string;
+  date: string;
 }
 
 const listeners = new Set<() => void>();
@@ -85,7 +91,11 @@ export function unkeepRepo(fullName: string): Promise<void> {
     await writeKeptRepos((await listKeptRepos()).filter(r => r.fullName !== fullName));
     const prefix = `${BLOB_PREFIX}${fullName}:`;
     const keys = (await AsyncStorage.getAllKeys()).filter(
-      k => k.startsWith(prefix) || k === TREE_PREFIX + fullName || k === SKIPPED_PREFIX + fullName,
+      k =>
+        k.startsWith(prefix) ||
+        k === TREE_PREFIX + fullName ||
+        k === SKIPPED_PREFIX + fullName ||
+        k === MODIFIED_PREFIX + fullName,
     );
     await Promise.all(keys.map(k => AsyncStorage.removeItem(k)));
   });
@@ -121,6 +131,18 @@ export function getKeptTree(fullName: string): Promise<TreeEntry[] | null> {
 
 export async function saveKeptTree(fullName: string, entries: TreeEntry[]): Promise<void> {
   await AsyncStorage.setItem(TREE_PREFIX + fullName, JSON.stringify(entries));
+}
+
+export async function getKeptDates(fullName: string): Promise<Record<string, KeptDate>> {
+  return (await readJson<Record<string, KeptDate>>(MODIFIED_PREFIX + fullName)) ?? {};
+}
+
+export async function getKeptModified(fullName: string): Promise<Record<string, string>> {
+  return Object.fromEntries(Object.entries(await getKeptDates(fullName)).map(([path, d]) => [path, d.date]));
+}
+
+export async function saveKeptModified(fullName: string, dates: Record<string, KeptDate>): Promise<void> {
+  await AsyncStorage.setItem(MODIFIED_PREFIX + fullName, JSON.stringify(dates));
 }
 
 export async function hasBlob(fullName: string, sha: string): Promise<boolean> {
@@ -203,4 +225,43 @@ export async function recordCommittedFile(fullName: string, path: string, file: 
     await saveKeptTree(fullName, [...rest, { path, type: 'blob', sha: file.sha, size: file.text.length }]);
   });
   if (written) notify();
+}
+
+// Only for a commit made from this device; reads go through recordCommittedFile and keep their dates.
+export async function recordModified(fullName: string, path: string, sha: string): Promise<void> {
+  const date = new Date().toISOString();
+  const parts = path.split('/');
+  // Folder shas are unknown here, so the next sync or refresh re-dates them.
+  const touched = parts.map((_, i): [string, KeptDate] => [parts.slice(0, i + 1).join('/'), { sha: i === parts.length - 1 ? sha : '', date }]);
+  const written = await whileKept(fullName, async () => {
+    await saveKeptModified(fullName, { ...(await getKeptDates(fullName)), ...Object.fromEntries(touched) });
+  });
+  if (written) notify();
+}
+
+function sameDate(a: KeptDate | undefined, b: KeptDate | undefined): boolean {
+  return a?.sha === b?.sha && a?.date === b?.date;
+}
+
+// Lookups take seconds, so a path another writer re-dated since the snapshot keeps that newer date.
+export async function applyDates(
+  fullName: string,
+  snapshot: Record<string, KeptDate>,
+  updates: Record<string, KeptDate>,
+  drop: (path: string) => boolean = () => false,
+): Promise<Record<string, KeptDate> | null> {
+  let result: Record<string, KeptDate> | null = null;
+  await whileKept(fullName, async () => {
+    const current = await getKeptDates(fullName);
+    const next: Record<string, KeptDate> = {};
+    for (const [path, d] of Object.entries(current)) {
+      if (!drop(path) || !sameDate(d, snapshot[path])) next[path] = d;
+    }
+    for (const [path, d] of Object.entries(updates)) {
+      if (sameDate(current[path], snapshot[path])) next[path] = d;
+    }
+    await saveKeptModified(fullName, next);
+    result = next;
+  });
+  return result;
 }

@@ -100,7 +100,7 @@ describe('modified dates', () => {
     return respond({ data: { repository: { object } } });
   }
 
-  it('dates every path in a large folder, one batch at a time', async () => {
+  it('dates every path in a large folder, a few batches at a time', async () => {
     let inFlight = 0;
     let peak = 0;
     const fetcher = jest.fn(async (_url: string, init: RequestInit) => {
@@ -110,12 +110,12 @@ describe('modified dates', () => {
       inFlight -= 1;
       return historyResponse(init);
     });
-    const paths = Array.from({ length: 250 }, (_, i) => `f${i}.md`);
+    const paths = Array.from({ length: 450 }, (_, i) => `f${i}.md`);
     const dates = await new GitHub('t', fetcher as unknown as typeof fetch).modifiedDates('alice/notes', paths, 'main');
-    expect(fetcher).toHaveBeenCalledTimes(3);
-    expect(peak).toBe(1);
-    expect(Object.keys(dates)).toHaveLength(250);
-    expect(dates['f249.md']).toBe('date-f249.md');
+    expect(fetcher).toHaveBeenCalledTimes(9);
+    expect(peak).toBe(4);
+    expect(Object.keys(dates)).toHaveLength(450);
+    expect(dates['f449.md']).toBe('date-f449.md');
   });
 
   it('omits paths with no history', async () => {

@@ -1,6 +1,6 @@
 import { GitHub, GitHubError, Repo, isConflict, isTransient } from './github';
 import { Draft, cacheFile, deleteDraft, fileId, getDraft, listDrafts, writeDraft } from './localFiles';
-import { recordCommittedFile } from './offlineRepos';
+import { recordCommittedFile, recordModified } from './offlineRepos';
 
 type Listener = () => void;
 
@@ -76,6 +76,9 @@ async function send(github: GitHub, draft: Draft): Promise<string> {
     );
     await recordCommittedFile(draft.repoFullName, draft.path, { sha, text: draft.text }).catch((e: unknown) =>
       console.warn('Could not update the offline copy', e),
+    );
+    await recordModified(draft.repoFullName, draft.path, sha).catch((e: unknown) =>
+      console.warn('Could not update the offline dates', e),
     );
   }
   return sha;

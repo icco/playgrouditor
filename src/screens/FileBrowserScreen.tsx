@@ -15,13 +15,13 @@ import {
 } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { skipToken, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, skipToken, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../theme/ThemeContext';
 import { errorMessage } from '../lib/errors';
 import { Entry, formatDate, isEditable, isMarkdown, newFilePath, sortEntries } from '../lib/github';
-import { listDirOffline, repoOffline } from '../lib/offlineFallback';
+import { listDirOffline, modifiedDatesOffline, refreshKeptDates, repoOffline } from '../lib/offlineFallback';
 import { turnOffOffline, turnOnOffline } from '../lib/offlineActions';
 import { offlineStatus } from '../lib/offlineStatus';
 import { useKeptRepos } from '../lib/useKeptRepos';
@@ -56,25 +56,31 @@ export function FileBrowserScreen({ route, navigation }: Props) {
     enabled: !!github && !!defaultBranch,
   });
 
+  const kept = useKeptRepos().find(r => r.fullName === repoFullName);
   const paths = useMemo(() => (dirQuery.data ?? []).map(e => e.path), [dirQuery.data]);
   const modifiedQuery = useQuery({
-    queryKey: ['modified', repoFullName, currentPath, defaultBranch, paths],
-    queryFn: () => github!.modifiedDates(repoFullName, paths, defaultBranch!),
+    queryKey: ['modified', repoFullName, currentPath, defaultBranch, paths, kept?.syncedAt],
+    queryFn: () => modifiedDatesOffline(github!, repoFullName, paths, defaultBranch!),
     enabled: isFocused && !!github && !!defaultBranch && sortBy === 'modified' && paths.length > 0,
+    staleTime: MODIFIED_STALE_MS,
+    placeholderData: keepPreviousData,
+  });
+  const refreshQuery = useQuery({
+    queryKey: ['modified', repoFullName, currentPath, defaultBranch, 'refresh', kept?.syncedAt, dirQuery.dataUpdatedAt],
+    queryFn: () => refreshKeptDates(github!, repoFullName, dirQuery.data!, defaultBranch!),
+    enabled: isFocused && !!github && !!defaultBranch && sortBy === 'modified' && !!kept && !!dirQuery.data?.length,
     staleTime: MODIFIED_STALE_MS,
   });
 
   const entries = useMemo(() => {
-    const dates = sortBy === 'modified' ? modifiedQuery.data : undefined;
+    const dates = sortBy === 'modified' ? { ...modifiedQuery.data, ...(kept ? refreshQuery.data : undefined) } : undefined;
     const withDates = (dirQuery.data ?? []).map(e => ({ ...e, modified: dates?.[e.path] }));
     return sortEntries(withDates, sortBy);
-  }, [dirQuery.data, modifiedQuery.data, sortBy]);
+  }, [dirQuery.data, modifiedQuery.data, refreshQuery.data, kept, sortBy]);
 
-  const failure = repoQuery.error ?? dirQuery.error ?? (sortBy === 'modified' ? modifiedQuery.error : null);
+  const failure = repoQuery.error ?? dirQuery.error ?? (sortBy === 'modified' ? (modifiedQuery.error ?? refreshQuery.error) : null);
   const loading = !dirQuery.data && (repoQuery.isLoading || dirQuery.isLoading);
   const breadcrumbs = currentPath ? currentPath.split('/') : [];
-
-  const kept = useKeptRepos().find(r => r.fullName === repoFullName);
 
   function toggleOffline(on: boolean) {
     const action = on && github && defaultBranch ? turnOnOffline(github, repoFullName, defaultBranch) : turnOffOffline(repoFullName);

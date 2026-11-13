@@ -1,6 +1,8 @@
 import { GitHub, GitHubError, TreeEntry, isEditable } from './github';
 import {
   deleteUnreferencedBlobs,
+  applyDates,
+  getKeptDates,
   getSkippedShas,
   hasBlob,
   isSymlink,
@@ -15,6 +17,7 @@ import {
 const MAX_FILE_BYTES = 1_000_000;
 const BATCH_SIZE = 4;
 const RATE_LIMIT_FLOOR = 500;
+const DATES_CHUNK = 200;
 
 const running = new Map<string, Promise<void>>();
 
@@ -88,6 +91,7 @@ async function runSync(github: GitHub, fullName: string, shouldStop: () => boole
       await deleteUnreferencedBlobs(fullName, new Set(stored.map(f => f.sha)));
       await saveSkippedShas(fullName, new Set([...skipped].filter(sha => treeShas.has(sha))));
     });
+    if (!(await syncDates(github, fullName, tree.entries, repo.default_branch, shouldStop))) return;
     await updateKeptRepo(fullName, {
       treeSha: tree.sha,
       syncedAt: new Date().toISOString(),
@@ -101,4 +105,22 @@ async function runSync(github: GitHub, fullName: string, shouldStop: () => boole
   } finally {
     await updateKeptRepo(fullName, { syncing: false });
   }
+}
+
+// An unchanged sha means no commit touched that path, so only changed paths cost a history lookup.
+async function syncDates(github: GitHub, fullName: string, entries: TreeEntry[], ref: string, shouldStop: () => boolean): Promise<boolean> {
+  const start = await getKeptDates(fullName);
+  const stale = entries.filter(e => start[e.path]?.sha !== e.sha);
+  for (let i = 0; i < stale.length; i += DATES_CHUNK) {
+    if (shouldStop()) return false;
+    const chunk = stale.slice(i, i + DATES_CHUNK);
+    const snapshot = await getKeptDates(fullName);
+    const fresh = await github.modifiedDates(fullName, chunk.map(e => e.path), ref);
+    const updates = Object.fromEntries(chunk.filter(e => fresh[e.path]).map(e => [e.path, { sha: e.sha, date: fresh[e.path] }]));
+    if (!(await applyDates(fullName, snapshot, updates))) return false;
+  }
+  if (shouldStop()) return false;
+  const shas = new Map(entries.map(e => [e.path, e.sha]));
+  await applyDates(fullName, start, {}, path => shas.get(path) !== start[path]?.sha);
+  return true;
 }
