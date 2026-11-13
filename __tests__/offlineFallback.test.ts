@@ -1,7 +1,7 @@
 import { GitHub, GitHubError, NETWORK_ERROR_STATUS } from '../src/lib/github';
 import { clearLocalFiles, getCachedFile } from '../src/lib/localFiles';
 import { keepRepo, recordCommittedFile, saveBlob, saveKeptModified, saveKeptTree } from '../src/lib/offlineRepos';
-import { listDirOffline, modifiedDatesOffline, readFileOffline, rememberFile, repoOffline } from '../src/lib/offlineFallback';
+import { listDirOffline, modifiedDatesOffline, readFileOffline, refreshKeptDates, rememberFile, repoOffline } from '../src/lib/offlineFallback';
 
 jest.mock('@react-native-async-storage/async-storage', () => {
   const store = new Map<string, string>();
@@ -71,18 +71,38 @@ describe('offline fallback', () => {
     await expect(readFileOffline(repo, 'big.md', null)).rejects.toThrow('This file is not stored offline.');
   });
 
-  it('dates a kept folder from the offline copy, fetching only paths it lacks', async () => {
+  it('dates a kept folder only from the offline copy', async () => {
     await saveKeptModified(repo, { docs: { sha: 't1', date: '2026-01-01T00:00:00Z' } });
     const gh = new GitHub('t');
-    const fetched = jest.spyOn(gh, 'modifiedDates').mockResolvedValue({ 'docs/new.md': '2026-02-01T00:00:00Z' });
-    const dates = await modifiedDatesOffline(gh, repo, ['docs', 'docs/new.md'], 'trunk');
-    expect(fetched).toHaveBeenCalledWith(repo, ['docs/new.md'], 'trunk');
-    expect(dates).toEqual({ docs: '2026-01-01T00:00:00Z', 'docs/new.md': '2026-02-01T00:00:00Z' });
+    const fetched = jest.spyOn(gh, 'modifiedDates');
+    await expect(modifiedDatesOffline(gh, repo, ['docs', 'docs/new.md'], 'trunk')).resolves.toEqual({ docs: '2026-01-01T00:00:00Z' });
+    expect(fetched).not.toHaveBeenCalled();
   });
 
-  it('returns kept dates offline', async () => {
-    await saveKeptModified(repo, { docs: { sha: 't1', date: '2026-01-01T00:00:00Z' } });
-    await expect(modifiedDatesOffline(offline, repo, ['docs', 'docs/a.md'], 'trunk')).resolves.toEqual({ docs: '2026-01-01T00:00:00Z' });
+  it('refreshes only new or changed entries and stores them', async () => {
+    await saveKeptModified(repo, {
+      'docs/a.md': { sha: 'a1', date: '2026-01-01T00:00:00Z' },
+      'docs/b.md': { sha: 'b1', date: '2026-01-01T00:00:00Z' },
+    });
+    const gh = new GitHub('t');
+    const fetched = jest.spyOn(gh, 'modifiedDates').mockResolvedValue({ 'docs/b.md': '2026-03-01T00:00:00Z', 'docs/new.md': '2026-02-01T00:00:00Z' });
+    const entries = [
+      { name: 'a.md', path: 'docs/a.md', type: 'file' as const, sha: 'a1' },
+      { name: 'b.md', path: 'docs/b.md', type: 'file' as const, sha: 'b2' },
+      { name: 'new.md', path: 'docs/new.md', type: 'file' as const, sha: 'n1' },
+    ];
+    await refreshKeptDates(gh, repo, entries, 'trunk');
+    expect(fetched).toHaveBeenCalledWith(repo, ['docs/b.md', 'docs/new.md'], 'trunk');
+    await expect(modifiedDatesOffline(gh, repo, entries.map(e => e.path), 'trunk')).resolves.toEqual({
+      'docs/a.md': '2026-01-01T00:00:00Z',
+      'docs/b.md': '2026-03-01T00:00:00Z',
+      'docs/new.md': '2026-02-01T00:00:00Z',
+    });
+  });
+
+  it('keeps stored dates when a refresh runs offline', async () => {
+    const entries = [{ name: 'a.md', path: 'docs/a.md', type: 'file' as const, sha: 'a1' }];
+    await expect(refreshKeptDates(offline, repo, entries, 'trunk')).resolves.toEqual({});
   });
 
   it('dates a committed file and its folders as now', async () => {

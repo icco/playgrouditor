@@ -1,6 +1,15 @@
 import { Entry, GitHub, GitHubError, NETWORK_ERROR_STATUS, Repo } from './github';
 import { CachedFile, cacheFile } from './localFiles';
-import { getKeptModified, getKeptRepo, listKeptDir, readKeptFile, recordCommittedFile } from './offlineRepos';
+import {
+  getKeptDates,
+  getKeptModified,
+  getKeptRepo,
+  listKeptDir,
+  readKeptFile,
+  recordCommittedFile,
+  saveKeptModified,
+  whileKept,
+} from './offlineRepos';
 
 function isNetworkError(e: unknown): boolean {
   return e instanceof GitHubError && e.status === NETWORK_ERROR_STATUS;
@@ -17,19 +26,29 @@ export async function listDirOffline(github: GitHub, fullName: string, path: str
   }
 }
 
-// Kept repos answer from the dates the sync stores, so only paths it has not dated yet go to GitHub.
+// Kept repos answer only from stored dates, so sorting never waits on GitHub; refreshKeptDates fills gaps.
 export async function modifiedDatesOffline(github: GitHub, fullName: string, paths: string[], ref: string): Promise<Record<string, string>> {
   if (!(await getKeptRepo(fullName))) return github.modifiedDates(fullName, paths, ref);
   const kept = await getKeptModified(fullName);
-  const dates = Object.fromEntries(paths.filter(p => kept[p]).map(p => [p, kept[p]]));
-  const missing = paths.filter(p => !kept[p]);
-  if (!missing.length) return dates;
+  return Object.fromEntries(paths.filter(p => kept[p]).map(p => [p, kept[p]]));
+}
+
+export async function refreshKeptDates(github: GitHub, fullName: string, entries: Entry[], ref: string): Promise<Record<string, string>> {
+  const known = await getKeptDates(fullName);
+  const stale = entries.filter(e => known[e.path]?.sha !== e.sha);
+  if (!stale.length) return {};
+  let fresh: Record<string, string>;
   try {
-    return { ...dates, ...(await github.modifiedDates(fullName, missing, ref)) };
+    fresh = await github.modifiedDates(fullName, stale.map(e => e.path), ref);
   } catch (e: unknown) {
     if (!isNetworkError(e)) throw e;
-    return dates;
+    return {};
   }
+  await whileKept(fullName, async () => {
+    const updates = Object.fromEntries(stale.filter(e => fresh[e.path]).map(e => [e.path, { sha: e.sha, date: fresh[e.path] }]));
+    await saveKeptModified(fullName, { ...(await getKeptDates(fullName)), ...updates });
+  });
+  return fresh;
 }
 
 export async function repoOffline(github: GitHub, fullName: string): Promise<Repo> {
