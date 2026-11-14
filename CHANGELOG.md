@@ -1,3 +1,10 @@
+## [1.3.2](https://github.com/icco/[secure]/compare/v1.3.1...v1.3.2) (2026-11-14)
+
+
+### Bug Fixes
+
+* **browser:** sort by modified from the offline cache and fetch dates in parallel ([#22](https://github.com/icco/[secure]/issues/22)) ([2d5f6de](https://github.com/icco/[secure]/commit/2d5f6de0f01b150fad3d5c7e31a26f3ea3e79fc6))
+
 ## [1.3.1](https://github.com/icco/[secure]/compare/v1.3.0...v1.3.1) (2026-11-13)
 
 # [1.3.0](https://github.com/icco/[secure]/compare/v1.2.1...v1.3.0) (2026-11-12)
